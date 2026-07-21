@@ -28,7 +28,8 @@ not include that repository's Git history.
 - Licensed under the MIT License.
 - Scanned with Gitleaks 8.30.1 before the first public release; no leaks were
   reported.
-- No screenshots, static binary assets, or private test fixtures are included.
+- No screenshots, personal images, or private test fixtures are included; the
+  only binary asset is the application favicon.
 - The public repository must be initialized from this directory so the private
   repository's history is never copied.
 - Deployment workflows remain excluded and require a separate public-safety
