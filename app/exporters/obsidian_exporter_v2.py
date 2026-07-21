@@ -113,7 +113,7 @@ def _export_topic_notes(vault_root: Path, signals_data: list[dict[str, Any]]) ->
         if not topic_signals:
             continue
 
-        # 先放宽，哪怕只有 1 条也导出，先把层跑通
+    # Export even a single item so the layer remains testable end to end.
         if len(topic_signals) < 1:
             continue
 

@@ -2,25 +2,26 @@
 
 source: Brain2Qwerty v2 announcement (Meta, ~2026-06-30)
 
-packet scope: announcement text only (未含 Nature 论文全文)
+packet scope: announcement text only (the full Nature paper is not included)
 
-conclusion tested: "非侵入方案正在逼近植入级精度"
+conclusion tested: "Non-invasive systems are approaching implant-level accuracy."
 
 verdict: underdetermined
 
-counter-conclusion status: valid_counter (纯由 load-bearing claims 内部构造, 未引外部事实)
+counter-conclusion status: valid_counter (constructed only from load-bearing claims, with no external facts introduced)
 
 attack paths: scope_inflation=risk / caveat_stripping=not_checkable / juxtaposition_fusion=risk
 
-FP/FN risk: low (TP, 与人工预期一致)
+FP/FN risk: low (true positive, consistent with the human expectation)
 
 reviewer note:
 
-verdict 由 scope_inflation + juxtaposition + valid_counter 撑住, 非由
-caveat_stripping 决定。caveat_stripping 因 packet 仅含 announcement 而
-not_checkable。
+The verdict is supported by scope_inflation, juxtaposition, and valid_counter,
+not by caveat_stripping. Because the packet contains only the announcement,
+caveat_stripping is not_checkable.
 
-本样本校准的是 counter-conclusion 主机制, 不是 caveat_stripping 子路径。
+This sample calibrates the primary counter-conclusion mechanism, not the
+caveat_stripping sub-path.
 
 ## Boundary
 

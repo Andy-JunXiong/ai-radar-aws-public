@@ -12,7 +12,7 @@ export function DaoFaShu({ items }: { items: DaoFaShuItem[] }) {
             className="text-4xl md:text-5xl text-stone-50 mb-4"
             style={{ fontFamily: "Fraunces, Georgia, serif", fontWeight: 300 }}
           >
-            <em className="italic text-cyan-300">道 · 法 · 术</em>
+            <em className="italic text-cyan-300">Principle · Method · Tactic</em>
             <br />
             applied to AI systems.
           </h2>

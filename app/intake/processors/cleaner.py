@@ -6,11 +6,11 @@ def clean_text(text: str) -> str:
     if not text:
         return ""
 
-    # 先去 HTML
+    # Remove HTML first.
     soup = BeautifulSoup(text, "html.parser")
     cleaned = soup.get_text(separator=" ", strip=True)
 
-    # 压缩空白
+    # Collapse whitespace.
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
 
     return cleaned

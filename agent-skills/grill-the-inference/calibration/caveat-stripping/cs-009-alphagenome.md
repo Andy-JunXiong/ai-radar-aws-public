@@ -20,7 +20,8 @@ omitted: no
 
 verification: single
 
-NOTE: omitted=no 经 Andy 实搜确认博客 Current limitations 段含此限制
+NOTE: omitted=no. Andy manually confirmed that the blog's Current limitations
+section contains this limitation.
 
 ## Dataset Metadata
 

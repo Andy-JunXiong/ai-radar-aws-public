@@ -2700,7 +2700,7 @@ export default function SignalDetailClient() {
       }
 
       try {
-        // 第一层：正常 signal detail
+    // First path: standard signal detail.
         const res = await fetch(`${API_BASE}/signals/${encodeURIComponent(id)}`, {
           signal: signalController.signal,
         });
@@ -2715,7 +2715,7 @@ export default function SignalDetailClient() {
           return;
         }
 
-        // 第二层：尝试 manual session
+      // Second path: try the manual session fallback.
         console.log("signal not found, trying manual session fallback");
 
         const normalizedManualId =
@@ -3482,7 +3482,7 @@ export default function SignalDetailClient() {
   const externalSynthesisLooksLikeUiDump =
     externalSynthesisUiChromeHitCount >= 4 ||
     (externalSynthesisFileNameLower.endsWith(".html") && externalSynthesisUiChromeHitCount >= 2);
-  const externalSynthesisMojibakeCount = (externalSynthesisDraftText.match(/[\u9225\u9983\ufffd]/g) || []).length;
+  const externalSynthesisMojibakeCount = (externalSynthesisDraftText.match(/[\ufffd]/g) || []).length;
   const externalSynthesisLooksEncodingDamaged =
     externalSynthesisMojibakeCount >= 3 ||
     externalSynthesisDraftTextLower.includes("mojibake");

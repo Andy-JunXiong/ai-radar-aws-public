@@ -20,7 +20,9 @@ omitted: yes
 
 verification: dual
 
-NOTE: omitted证无已完成——博客全文检索 natural-language/domain-specific/translation/approximate comparison 等7词均无命中
+NOTE: the omitted-evidence check is complete. A full-text search of the blog
+found no matches for seven relevant terms, including natural-language,
+domain-specific, translation, and approximate comparison.
 
 ## Dataset Metadata
 

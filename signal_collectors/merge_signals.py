@@ -33,7 +33,7 @@ def load_json(path: Path):
 
 def normalize_rss(data):
     """
-    collector 输出格式支持两种：
+    Collector output supports two formats:
     1. list[dict]
     2. {
          "generated_at": "...",
@@ -51,7 +51,7 @@ def normalize_rss(data):
 
 def normalize_manual(data):
     """
-    manual_signals.json 预期是：
+    manual_signals.json is expected to contain:
     1. list[dict]
     2. {"signals": [...]}
     """

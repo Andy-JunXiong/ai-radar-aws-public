@@ -32,7 +32,7 @@ SUBSCRIPTION_S3_PREFIX = (
     or "settings/subscriptions"
 ).strip().strip("/")
 
-# 你也可以后面改成从 config / .env 读取
+# This can later be loaded from config or .env.
 RADAR_TIME_WINDOW_HOURS = 24
 
 HEADERS = {
@@ -214,7 +214,7 @@ def parse_datetime_safe(value: str) -> Optional[datetime]:
 
     value = clean_text(value)
 
-    # 兼容 Z 结尾
+    # Accept timestamps ending in Z.
     if value.endswith("Z"):
         value = value.replace("Z", "+00:00")
 
@@ -359,7 +359,7 @@ def parse_article_page(
 
     published_dt = parse_datetime_safe(published_at)
     if not published_dt:
-        # 没有可解析发布时间的文章，直接丢弃，避免旧文章混入
+        # Drop articles without a parseable publication time to avoid mixing in stale content.
         print(f"[official] skip no/invalid published_at: {url}")
         return None
 

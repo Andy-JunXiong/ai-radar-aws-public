@@ -31,10 +31,6 @@ INFLATED_TERMS = {
     "revolutionary",
     "solved",
     "transformative",
-    "颠覆",
-    "革命",
-    "范式",
-    "终局",
 }
 
 BOUNDARY_TERMS = {
@@ -48,10 +44,6 @@ BOUNDARY_TERMS = {
     "suggests",
     "uncertain",
     "unknown",
-    "可能",
-    "实验",
-    "早期",
-    "不确定",
 }
 
 PRODUCTION_TERMS = {
@@ -59,9 +51,6 @@ PRODUCTION_TERMS = {
     "enterprise",
     "deployed",
     "at scale",
-    "生产",
-    "企业级",
-    "规模化",
 }
 
 

@@ -9,7 +9,7 @@ import snscrape.modules.twitter as sntwitter
 BASE_DIR = Path(__file__).resolve().parent.parent
 CONTEXT_FILE = BASE_DIR / "app" / "context" / "source_accounts.json"
 
-# 关键修复：不要再写主链路 signals.json
+# Important: do not write to the primary pipeline's signals.json.
 OUTPUT_FILE = BASE_DIR / "output" / "twitter_signals.json"
 
 RADAR_TIME_WINDOW_HOURS = 24

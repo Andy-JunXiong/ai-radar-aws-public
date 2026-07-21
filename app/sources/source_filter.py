@@ -5,7 +5,7 @@ def filter_signals(signals, source_stats):
         source = s.get("source", "unknown")
         quality = source_stats.get(source, {}).get("quality_score", 0)
 
-        # 核心规则（可调）
+# Core rules (tunable)
         if quality >= 0.8:
             s["quality_level"] = "high"
             filtered.append(s)
@@ -14,8 +14,8 @@ def filter_signals(signals, source_stats):
             filtered.append(s)
         else:
             s["quality_level"] = "low"
-            # 可以选择丢弃或保留
-            # 先保留，但标记
+        # The caller may choose to discard or retain it.
+        # Retain it for now, but mark it.
             filtered.append(s)
 
     return filtered

@@ -28,11 +28,11 @@ def write_json(filepath: Path, data: list[dict]) -> None:
 
 
 def build_analysis_input(signal, threshold: float = 0.5) -> str:
-    # 如果 clean_text 本来就不长，直接用 clean_text
+    # Use clean_text directly when it is already short.
     if len(signal.clean_text) <= 300:
         return signal.clean_text
 
-    # 长文本再按分数决定
+    # Apply score-based selection to longer text.
     if signal.scores.total >= threshold:
         return signal.clean_text
 
@@ -117,7 +117,7 @@ def run_pipeline_on_signals(signals: list) -> list:
     for signal in curated_signals:
         try:
             analysis = analyze_signal(signal)
-            # 如果 analyze_signal 返回字符串，可以先挂到 signal 上备用
+    # If analyze_signal returns a string, attach it to the signal for later use.
             setattr(signal, "ai_analysis", analysis)
         except Exception as e:
             setattr(signal, "ai_analysis", f"AI ANALYSIS ERROR: {e}")

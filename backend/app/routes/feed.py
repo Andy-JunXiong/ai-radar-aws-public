@@ -42,7 +42,7 @@ def get_feed_activity():
             },
         }
 
-    # 去重：同一天只保留最后一条
+    # Deduplicate by retaining only the last item for each day.
     deduped = {}
     for item in items:
         date = item.get("date")

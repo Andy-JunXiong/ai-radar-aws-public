@@ -20,17 +20,17 @@ def fetch_article_text(url: str, timeout: int = 15) -> str:
     try:
         soup = BeautifulSoup(response.text, "html.parser")
 
-        # 先移除明显噪音
+    # Remove obvious noise first.
         for tag in soup(["script", "style", "nav", "footer", "header", "aside"]):
             tag.decompose()
 
-        # 优先尝试 article 标签
+    # Prefer the article element.
         article = soup.find("article")
         if article:
             text = article.get_text(separator=" ", strip=True)
             return text
 
-        # 如果没有 article，就退回 body
+    # Fall back to the body when no article element exists.
         body = soup.find("body")
         if body:
             text = body.get_text(separator=" ", strip=True)

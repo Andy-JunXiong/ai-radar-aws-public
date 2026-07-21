@@ -480,7 +480,7 @@ def _signal_status_rank(value: Any) -> int:
 
 def merge_signal_records(existing: Dict[str, Any], incoming: Dict[str, Any]) -> Dict[str, Any]:
     """
-    合并重复 signal，尽量保留更完整字段。
+    Merge duplicate signals while preserving the most complete fields available.
     """
     merged = dict(existing)
 

@@ -20,14 +20,14 @@ class WorkspaceChatPromptTests(unittest.TestCase):
 
         self.assertNotIn("CONVERSATION CHALLENGE PROTOCOL", prompt)
         self.assertNotIn("ANDY CONVERSATION PREFERENCES", prompt)
-        self.assertNotIn("可 = continue", prompt)
+        self.assertNotIn("offer exactly these three options", prompt)
 
     def test_challenge_mode_adds_reasoning_only_protocol(self):
         prompt = workspace_chat_system_prompt("chatgpt", challenge_mode=True)
 
         self.assertIn("CONVERSATION CHALLENGE PROTOCOL", prompt)
         self.assertIn("reasoning challenge only", prompt)
-        self.assertIn("可 = continue", prompt)
+        self.assertIn("offer exactly these three options", prompt)
         self.assertIn("Do not frame this as factual verification", prompt)
 
     def test_claude_discussion_can_mount_andy_conversation_preferences(self):

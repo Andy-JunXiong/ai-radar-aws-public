@@ -34,5 +34,8 @@ not include that repository's Git history.
   repository's history is never copied.
 - Deployment workflows remain excluded and require a separate public-safety
   review before they can be added.
+- Public source, documentation, tests, and UI copy are English-only. Run
+  `python scripts/check_public_english.py` before every public update; the same
+  check is registered as a local pre-commit hook.
 
 No credentials or private data are required to inspect the source code.

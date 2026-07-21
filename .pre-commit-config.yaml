@@ -8,3 +8,9 @@ repos:
         pass_filenames: false
         always_run: true
         files: ^backend/app/prompts/(registry|skill_meta)\.py$
+      - id: public-english-only
+        name: Enforce English-only public content
+        entry: python scripts/check_public_english.py
+        language: system
+        pass_filenames: false
+        always_run: true

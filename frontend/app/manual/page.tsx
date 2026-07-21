@@ -2675,7 +2675,7 @@ export default function ManualPage() {
                 flexShrink: 0,
               }}
             >
-              鈥?
+              ←
             </button>
 
             <div
@@ -2756,7 +2756,7 @@ export default function ManualPage() {
                 flexShrink: 0,
               }}
             >
-              鈥?
+              →
             </button>
 
             <button
@@ -2775,7 +2775,7 @@ export default function ManualPage() {
                 cursor: "pointer",
               }}
             >
-              脳
+              ×
             </button>
           </div>
         </div>

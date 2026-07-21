@@ -1638,10 +1638,10 @@ def render_gallery(title: str, images: list, state_prefix: str, is_uploaded: boo
     if not is_uploaded:
         return
 
-    st.markdown("**大图查看**")
+    st.markdown("**Full-size preview**")
     options = list(range(1, len(images) + 1))
     selected_num = st.selectbox(
-        "选择查看图片",
+        "Select an image",
         options,
         index=0,
         key=f"{state_prefix}_viewer_select",
@@ -2154,7 +2154,7 @@ daily_radar = load_json_from_s3(S3_BUCKET, daily_key)
 signals_data = load_json_from_s3(S3_BUCKET, signals_key)
 insights_data = load_json_from_s3(S3_BUCKET, insights_key)
 
-# ⭐ 关键：新增这一行（解决报错）
+# Required initialization to prevent the rendering error.
 history_overview = load_history_overview(S3_BUCKET, available_dates, max_days=7)
 trend_insight = generate_trend_insight_llm(json.dumps(history_overview, ensure_ascii=False, sort_keys=True))
 
@@ -2163,7 +2163,7 @@ source_stats = normalize_source_stats(daily_radar, signals)
 insights = normalize_insights(insights_data, daily_radar)
 trend_summary = normalize_trend_summary(daily_radar)
 
-# ⭐ 新增：Intelligence Blocks
+# Add Intelligence Blocks.
 render_intelligence_blocks(daily_radar)
 
 st.title("AI Radar Workspace")
@@ -2339,10 +2339,10 @@ st.markdown(
 manual_left, manual_right = st.columns([1.2, 1.8], gap="large")
 
 with manual_left:
-    st.markdown("**上传与分析**")
+    st.markdown("**Upload and analysis**")
     top_action_1, top_action_2 = st.columns(2)
     with top_action_1:
-        if st.button("新建上传批次", use_container_width=True, key="manual_new_batch_btn"):
+        if st.button("Start new upload batch", use_container_width=True, key="manual_new_batch_btn"):
             st.session_state.manual_uploader_version += 1
             st.session_state.manual_vision_result = None
             st.session_state.manual_vision_result_zh = None
@@ -2351,7 +2351,7 @@ with manual_left:
             st.session_state.curated_upload_signals = []
             st.rerun()
     with top_action_2:
-        st.caption("开始新批次后，旧内容会被清空，不需要一项项删除。当前支持纯图片批次或纯文件批次。下一步建议：把文件内容也接入统一 signal pipeline，形成 image/text/pdf → signal → insight 的完整闭环。")
+        st.caption("Starting a new batch clears the previous content. Use either an image-only batch or a file-only batch. A future step is to connect file content to the shared signal pipeline: image/text/PDF -> signal -> insight.")
 
     pending_manual_load = st.session_state.get("manual_pending_load_session")
     if isinstance(pending_manual_load, dict):
@@ -2367,7 +2367,7 @@ with manual_left:
     manual_session_title = st.text_input(
         "Session title",
         key="manual_session_title",
-        placeholder="例如：Agent 架构截图 / 小红书批量截图 / AI notebook ideas",
+        placeholder="For example: agent architecture screenshots / research screenshots / AI notebook ideas",
     )
 
     manual_user_instruction = st.text_area(
@@ -2400,13 +2400,13 @@ with manual_left:
         st.warning("Please upload no more than 12 items in one batch.")
 
     if preview_images:
-        render_gallery("预览图片", preview_images, "manual_preview", is_uploaded=True)
+        render_gallery("Preview images", preview_images, "manual_preview", is_uploaded=True)
     if preview_docs:
-        render_uploaded_file_list("预览文件", preview_docs)
+        render_uploaded_file_list("Preview files", preview_docs)
 
     has_mixed_inputs = bool(preview_images and preview_docs)
     if has_mixed_inputs:
-        st.warning("当前版本暂不支持图片和文件混合分析。请分两批上传：一批图片，或一批文件。")
+        st.warning("Mixed image and file analysis is not supported yet. Upload images and files in separate batches.")
 
     analyze_btn_disabled = not preview_files or len(preview_files) > 12 or has_mixed_inputs
     analyze_button_label = "Analyze Uploads"
@@ -2455,7 +2455,7 @@ with manual_left:
         st.rerun()
 
 with manual_right:
-    st.markdown("**当前分析（中文显示）**")
+    st.markdown("**Current analysis**")
     current_manual_result = st.session_state.get("manual_vision_result")
     current_manual_result_zh = st.session_state.get("manual_vision_result_zh")
 
@@ -2486,7 +2486,7 @@ with manual_right:
             if not zh_career:
                 zh_career = current_manual_result.get("career_takeaways", []) or []
 
-            render_scroll_text_box("1. Claude 总结", zh_summary, height=180)
+            render_scroll_text_box("1. Claude summary", zh_summary, height=180)
 
             insight_edit_key = "manual_insight_for_me_zh_edit"
             result_signature = (
@@ -2499,21 +2499,21 @@ with manual_right:
                 st.session_state["manual_insight_result_signature"] = result_signature
                 st.session_state[insight_edit_key] = zh_insight
 
-            st.markdown("**2. 我的见解（AI辅助生成，可编辑）**")
+            st.markdown("**2. My insight (AI-assisted and editable)**")
             edited_insight_zh = st.text_area(
-                "我的见解（AI辅助生成，可编辑）",
+                "My insight (AI-assisted and editable)",
                 height=180,
                 key=insight_edit_key,
                 label_visibility="collapsed",
             )
 
             render_scroll_text_box(
-                "3. 对我项目的关键 takeaways",
+                "3. Key takeaways for my projects",
                 format_takeaways_list(zh_projects),
                 height=180,
             )
             render_scroll_text_box(
-                "4. 对我职业和技能发展的关键 takeaways",
+                "4. Key takeaways for my career and skill development",
                 format_takeaways_list(zh_career),
                 height=180,
             )
@@ -2735,15 +2735,15 @@ if manual_sessions:
         saved_images = selected_manual_session.get("images", [])
         saved_files = selected_manual_session.get("files", []) or saved_images
         if saved_images:
-            render_gallery("已保存图片", saved_images, f"saved_manual_{safe_text(selected_manual_session.get('session_id', 'x'))}", is_uploaded=False)
+            render_gallery("Saved images", saved_images, f"saved_manual_{safe_text(selected_manual_session.get('session_id', 'x'))}", is_uploaded=False)
         non_image_files = [p for p in saved_files if not str(p).lower().endswith((".png", ".jpg", ".jpeg", ".webp"))]
         if non_image_files:
-            render_uploaded_file_list("已保存文件", non_image_files)
+            render_uploaded_file_list("Saved files", non_image_files)
 
         s1, s2 = st.columns(2, gap="small")
         with s1:
             render_scroll_text_box("Saved summary (English)", selected_manual_session.get("summary", ""), height=220)
-            render_scroll_text_box("Saved insight / 我的见解（English）", selected_manual_session.get("insights_for_me", ""), height=220)
+        render_scroll_text_box("Saved insight (English)", selected_manual_session.get("insights_for_me", ""), height=220)
         with s2:
             render_scroll_text_box(
                 "Saved project takeaways (English)",

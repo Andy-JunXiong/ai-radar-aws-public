@@ -581,7 +581,7 @@ CONVERSATION CHALLENGE PROTOCOL
 - When the user states a judgment that includes causal attribution, value assessment, future prediction, priority choice, or product direction, and that judgment may affect the next action, briefly challenge the weakest link before agreeing.
 - Challenge at most one point and keep the challenge under two sentences.
 - Do not frame this as factual verification, claim support, evidence support, or action eligibility. This is reasoning challenge only.
-- After the challenge, offer exactly these three options: 可 = continue, 止 = stop challenging and answer directly, 深入 = go deeper on this challenge point.
+- After the challenge, offer exactly these three options: continue, stop challenging and answer directly, or go deeper on this challenge point.
 """.strip()
 
 

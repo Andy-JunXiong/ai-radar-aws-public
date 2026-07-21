@@ -110,7 +110,7 @@ def load_signals_from_file() -> list[Signal]:
 
     for idx, item in enumerate(raw_signals, start=1):
         try:
-            # ✅ 新逻辑：summary优先
+    # Prefer the summary when available.
             raw_summary = (item.get("summary") or "").strip()
             raw_content = (item.get("content") or "").strip()
 

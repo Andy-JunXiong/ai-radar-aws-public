@@ -20,7 +20,7 @@ def build_signal(
     return {
         "title": title,
         "summary": summary,
-        "content": summary,  # 暂时保留兼容 main.py
+        "content": summary,  # Retained temporarily for main.py compatibility.
         "url": url,
         "author": author,
         "source": source,
@@ -34,8 +34,8 @@ def build_signal(
 
 def collect_official_signals() -> List[Dict]:
     """
-    当前先用高质量 mock（关键！）
-    后续可替换为 RSS / API
+    Use a high-quality mock for now.
+    This can later be replaced with RSS or API ingestion.
     """
 
     now = datetime.now(timezone.utc).isoformat()

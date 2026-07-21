@@ -925,7 +925,7 @@ export default function FrictionSignalsPage() {
                           textTransform: "uppercase",
                         }}
                       >
-                        中文翻译
+                        Chinese translation
                       </div>
                       <div style={{ color: "var(--app-info-fg)", lineHeight: 1.8, whiteSpace: "pre-wrap" }}>
                         {translation.translatedText}
@@ -1003,7 +1003,7 @@ export default function FrictionSignalsPage() {
                           onClick={() => (translation?.translatedFields ? enableChinese(entityId) : translateItem(item, index))}
                           style={surfaceActionButtonStyle}
                         >
-                          {translation?.loading ? "Translating..." : "中文"}
+                          {translation?.loading ? "Translating..." : "Chinese"}
                         </button>
                       )}
                       <a href={item.url} target="_blank" rel="noreferrer" style={surfaceActionLinkStyle}>

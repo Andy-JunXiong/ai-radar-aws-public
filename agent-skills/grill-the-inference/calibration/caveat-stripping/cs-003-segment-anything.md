@@ -4,7 +4,7 @@ id: cs-003
 
 paper: Segment Anything
 
-claim axis: any object in any image/video (覆盖轴)
+claim axis: any object in any image/video (coverage axis)
 
 CLAIM: "generate masks for any object in any image or any video"
 
@@ -20,7 +20,8 @@ omitted: yes
 
 verification: dual
 
-NOTE: claim=覆盖轴, limitation=精度轴, 两轴正交故非fatal
+NOTE: the claim concerns coverage while the limitation concerns precision; the
+two axes are orthogonal, so the limitation is not fatal.
 
 ## Dataset Metadata
 

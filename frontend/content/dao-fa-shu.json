@@ -1,19 +1,19 @@
 [
   {
-    "ch": "道",
-    "pinyin": "Dào",
+    "ch": "P",
+    "pinyin": "Principle",
     "en": "Principle",
     "body": "Cognitive sovereignty. Problem definition is the human's irreducible contribution; AI compresses execution, not judgement."
   },
   {
-    "ch": "法",
-    "pinyin": "Fǎ",
+    "ch": "M",
+    "pinyin": "Method",
     "en": "Method",
-    "body": "Five-layer convergence. Signal → Insight → Reflection → Knowledge → Project. Each layer has a single purpose, a single failure mode."
+    "body": "Five-layer convergence. Signal -> Insight -> Reflection -> Knowledge -> Project. Each layer has a single purpose and a single failure mode."
   },
   {
-    "ch": "术",
-    "pinyin": "Shù",
+    "ch": "T",
+    "pinyin": "Tactic",
     "en": "Tactic",
     "body": "Tag-first retrieval. Manual reflections. Resonance over similarity. Codex CLI + Telegram for mobile multi-project flow."
   }

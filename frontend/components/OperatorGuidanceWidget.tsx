@@ -56,15 +56,10 @@ function OperatorGuidanceWidgetInner() {
     const matchedEntry = globalAnswer ? null : findGuidanceEntry(trimmed, currentPath);
     const answer = stateAwareAnswer || (matchedEntry
       ? buildGuidanceAnswer(matchedEntry, language)
-      : language === "zh"
-        ? [
-            "我还没有找到这个步骤的明确建议。",
-            "你可以问：当前状态是什么意思、下一步应该怎么 review，或者为什么某个按钮不可用。",
-          ].join("\n\n")
       : [
-            "I do not have a clear recommendation for this exact step yet.",
-            "Try asking what the current status means, what the next review action should be, or why a button is disabled.",
-          ].join("\n\n"));
+          "I do not have a clear recommendation for this exact step yet.",
+          "Try asking what the current status means, what the next review action should be, or why a button is disabled.",
+        ].join("\n\n"));
     const previousAssistantText = [...messages].reverse().find((message) => message.role === "assistant")?.content || "";
     const groundedAnswer =
       globalAnswer ||

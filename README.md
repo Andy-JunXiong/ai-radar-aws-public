@@ -233,3 +233,8 @@ See [ROADMAP.md](ROADMAP.md) for current direction.
 ## License
 
 This project is available under the [MIT License](LICENSE).
+
+## Public language policy
+
+Public source, documentation, tests, and UI copy are maintained in English.
+Run `python scripts/check_public_english.py` before publishing changes.

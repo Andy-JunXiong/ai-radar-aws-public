@@ -275,7 +275,7 @@ function FrictionSignalDetailPageContent() {
               }}
               style={buttonActionStyle}
             >
-              {translationLoading ? "Translating..." : "中文"}
+              {translationLoading ? "Translating..." : "Chinese"}
             </button>
           )}
           {payload.url ? (

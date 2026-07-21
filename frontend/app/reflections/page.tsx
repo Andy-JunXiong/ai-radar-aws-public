@@ -476,11 +476,11 @@ export default function ReflectionsPage() {
                       <div>
                         <div style={{ color: "var(--app-text-strong)", fontWeight: 700 }}>{bucket.label}</div>
                         <div style={{ color: "var(--app-text-muted)", fontSize: "13px" }}>
-                          total {bucket.total} 路 correct {bucket.correct} 路 partial {bucket.partially_correct}
+                          total {bucket.total} | correct {bucket.correct} | partial {bucket.partially_correct}
                         </div>
                       </div>
                       <div style={{ color: "var(--app-text-muted)", fontSize: "13px" }}>
-                        wrong {bucket.wrong} 路 unclear {bucket.unclear}
+                        wrong {bucket.wrong} | unclear {bucket.unclear}
                       </div>
                     </div>
                   ))}

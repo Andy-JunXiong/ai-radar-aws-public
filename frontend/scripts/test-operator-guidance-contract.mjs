@@ -212,12 +212,12 @@ const knownPageCases = [
     mustInclude: [
       "Background Update Candidates",
       "ADR-0012 Signal claim feedback",
-      "只读下游候选队列",
+      "read-only downstream candidate queue",
       "not_me / blind_spot",
       "inactive candidates",
-      "不是外部事实证据",
-      "不会更新 background context",
-      "不会改变 verification_status",
+      "not external factual evidence",
+      "do not update background context",
+      "do not change verification_status",
       "Project Takeaway gates",
       "action eligibility",
     ],
@@ -239,7 +239,7 @@ const knownPageCases = [
     name: "knowledge page has knowledge-scoped guidance",
     pathname: "/knowledge",
     pageText: "Knowledge Review Queue Candidate Strong Fit Thin Fit Paired Signals Supply signal Demand pain",
-    mustInclude: ["Knowledge", "供给", "需求"],
+    mustInclude: ["Knowledge", "supply", "demand"],
   },
   {
     name: "radar page has radar-scoped guidance",
@@ -300,7 +300,7 @@ const knownPageCases = [
     name: "login page has login-scoped guidance",
     pathname: "/login",
     pageText: "Login admin session sign in",
-    mustInclude: ["登录", "60 分钟", "账户密码"],
+    mustInclude: ["login page", "60 idle minutes", "admin session"],
   },
   {
     name: "saved page has saved-scoped guidance",
@@ -381,32 +381,32 @@ const cases = [
     name: "operating home meaning stays home-scoped",
     pathname: "/",
     pageText: operatingHomeText,
-    question: "这个页面是什么意思",
-    mustInclude: ["AI Radar 的操作首页", "Intake", "Project Review", "Work Surfaces"],
+    question: "What does this page mean?",
+    mustInclude: ["AI Radar operating home", "Intake", "Project Review", "Work Surfaces"],
     mustNotInclude: ["Signal workflow overview", "Completion Note", "Workspace completion"],
   },
   {
     name: "operating home next step recommends a surface",
     pathname: "/",
     pageText: operatingHomeText,
-    question: "下一步做什么",
-    mustInclude: ["推荐下一步按钮：Signals", "操作首页"],
+    question: "What should I do next?",
+    mustInclude: ["Recommended next button: Signals", "operating home"],
     mustNotInclude: ["Signal workflow overview", "Completion Note"],
   },
   {
     name: "manual upload meaning stays upload-scoped",
     pathname: "/manual",
     pageText: manualUploadText,
-    question: "这个页面是什么意思",
-    mustInclude: ["Manual Upload", "上传原因", "Analyze Session"],
-    mustNotInclude: ["Signal workflow overview", "Confirm、Watch、Action", "Project Takeaway Review Inbox"],
+    question: "What does this page mean?",
+    mustInclude: ["Manual Upload", "upload reason", "Analyze Session"],
+    mustNotInclude: ["Signal workflow overview", "Confirm, Watch, Action", "Project Takeaway Review Inbox"],
   },
   {
     name: "manual upload next step recommends analyze session",
     pathname: "/manual",
     pageText: manualUploadText,
-    question: "下一步做什么",
-    mustInclude: ["推荐下一步按钮：Analyze Session", "source link"],
+    question: "What should I do next?",
+    mustInclude: ["Recommended next button: Analyze Session", "source link"],
     mustNotInclude: ["Signal workflow overview", "Watch Due", "Pending"],
   },
   {
@@ -423,7 +423,7 @@ const cases = [
       name: `${knownCase.name} meaning`,
       pathname: knownCase.pathname,
       pageText: knownCase.pageText,
-      question: "这个页面是什么意思",
+      question: "What does this page mean?",
       mustInclude: knownCase.mustInclude,
       mustNotInclude: ["Signal workflow overview", "Completion Note", "Open Detail"],
     },
@@ -431,8 +431,8 @@ const cases = [
       name: `${knownCase.name} next step`,
       pathname: knownCase.pathname,
       pageText: knownCase.pageText,
-      question: "下一步做什么",
-      mustInclude: ["推荐下一步按钮"],
+      question: "What should I do next?",
+      mustInclude: ["Recommended next button"],
       mustNotInclude: ["Signal workflow overview", "Completion Note", "Open Detail"],
     },
   ]),
@@ -510,24 +510,24 @@ const cases = [
     name: "nonexistent work page uses conservative fallback",
     pathname: "/experimental/unknown",
     pageText: "Experimental unknown page",
-    question: "这个页面是什么意思",
-    mustInclude: ["还没有更细的页面专属指导"],
+    question: "What does this page mean?",
+    mustInclude: ["no more specific page guidance yet"],
     mustNotInclude: ["Signal workflow overview", "Completion Note", "Project Takeaway Review Inbox"],
   },
   {
     name: "project review inbox meaning stays review-scoped",
     pathname: "/workspace/projects/review",
     pageText: projectReviewInboxText,
-    question: "这个页面是什么意思",
-    mustInclude: ["Project Takeaway Review Inbox", "人工审查", "Watch、Action"],
+    question: "What does this page mean?",
+    mustInclude: ["Project Takeaway Review Inbox", "human review", "Watch, Action"],
     mustNotInclude: ["Signal workflow overview", "Manual Upload", "Open Detail"],
   },
   {
     name: "project review inbox next step recommends review queues",
     pathname: "/workspace/projects/review",
     pageText: projectReviewInboxText,
-    question: "下一步做什么",
-    mustInclude: ["推荐下一步按钮：Watch Due / Action Due / Pending", "Confirm、Watch、Action"],
+    question: "What should I do next?",
+    mustInclude: ["Recommended next button: Watch Due / Action Due / Pending", "Confirm, Watch, Action"],
     mustNotInclude: ["Signal workflow overview", "Analyze Session", "Open Detail"],
   },
   {
@@ -738,17 +738,17 @@ const cases = [
     name: "signal list page meaning stays list-scoped",
     pathname: "/signals",
     pageText: signalListText,
-    question: "这个页面是什么意思",
-    mustInclude: ["Signal 时间线", "筛选和浏览"],
-    mustNotInclude: ["Completion Note", "Workspace completion", "已经完成到 Workspace", "Project Takeaway"],
+    question: "What does this page mean?",
+    mustInclude: ["Signal timeline", "browsing and filtering"],
+    mustNotInclude: ["Completion Note", "Workspace completion", "already completed into Workspace", "Project Takeaway"],
   },
   {
     name: "signal list next step recommends opening detail",
     pathname: "/signals",
     pageText: signalListText,
-    question: "下一步做什么",
-    mustInclude: ["推荐下一步按钮：Open Detail", "打开详情"],
-    mustNotInclude: ["Completion Note", "已经完成到 Workspace", "Project Takeaway"],
+    question: "What should I do next?",
+    mustInclude: ["Recommended next button: Open Detail", "open detail"],
+    mustNotInclude: ["Completion Note", "already completed into Workspace", "Project Takeaway"],
   },
   {
     name: "signal starred explains bookmark semantics",
@@ -763,16 +763,16 @@ const cases = [
     name: "signal detail gate meaning explains verification gate",
     pathname: "/signals/detail",
     pageText: signalDetailGateText,
-    question: "这个页面是什么意思",
-    mustInclude: ["verification / action gate", "证据还不足"],
-    mustNotInclude: ["Signal list", "筛选和浏览"],
+    question: "What does this page mean?",
+    mustInclude: ["verification or action-gate risk", "evidence is not strong enough"],
+    mustNotInclude: ["Signal list", "browsing and filtering"],
   },
   {
     name: "signal detail gate next step recommends review path",
     pathname: "/signals/detail",
     pageText: signalDetailGateText,
-    question: "下一步做什么",
-    mustInclude: ["推荐下一步按钮：Project Review Inbox", "不要直接做 action"],
+    question: "What should I do next?",
+    mustInclude: ["Recommended next button: Project Review Inbox", "Do not take action directly"],
     mustNotInclude: ["Signal list", "Open Detail"],
   },
   {
@@ -875,7 +875,7 @@ const cases = [
     pageText: signalDetailGateText,
     question: "What does AI Discussion challenge assumptions mean?",
     language: "en",
-    mustInclude: ["AI Discussion challenge", "not external factual verification", "does not change verification status", "可", "止", "深入"],
+    mustInclude: ["AI Discussion challenge", "not external factual verification", "does not change verification status", "continue", "stop", "go deeper"],
     mustNotInclude: ["Claim checks verify this", "Action is allowed", "Project Takeaway Review Inbox"],
   },
   {
@@ -1011,16 +1011,16 @@ const cases = [
     name: "signal detail rejected meaning stays rejected-scoped",
     pathname: "/signals/detail",
     pageText: signalDetailRejectedText,
-    question: "这个页面是什么意思",
-    mustInclude: ["Rejected signal", "价值不足"],
+    question: "What does this page mean?",
+    mustInclude: ["Rejected signal", "low value"],
     mustNotInclude: ["Signal list", "Completion Note"],
   },
   {
     name: "signal detail rejected next step recommends back navigation",
     pathname: "/signals/detail",
     pageText: signalDetailRejectedText,
-    question: "下一步做什么",
-    mustInclude: ["推荐下一步按钮：Back to Signal Records", "不要把它推进 Workspace"],
+    question: "What should I do next?",
+    mustInclude: ["Recommended next button: Back to Signal Records", "do not move it into Workspace"],
     mustNotInclude: ["Signal list", "Open Detail"],
   },
 ];
@@ -1037,24 +1037,24 @@ for (const route of discoveredRoutes) {
     name: `auto route coverage meaning ${route}`,
     pathname: route,
     pageText: sampleText,
-    question: "这个页面是什么意思",
+    question: "What does this page mean?",
     mustNotInclude: route.startsWith("/signals")
       ? ["Signal workflow overview"]
-      : ["Signal workflow overview", "Completion Note", "Open Detail", "还没有更细的页面专属指导"],
+      : ["Signal workflow overview", "Completion Note", "Open Detail", "no more specific page guidance yet"],
   });
 
   runCase({
     name: `auto route coverage next step ${route}`,
     pathname: route,
     pageText: sampleText,
-    question: "下一步做什么",
+    question: "What should I do next?",
     mustNotInclude: route.startsWith("/signals")
       ? ["Signal workflow overview"]
-      : ["Signal workflow overview", "Completion Note", "Open Detail", "还没有专属下一步规则"],
+      : ["Signal workflow overview", "Completion Note", "Open Detail", "dedicated next-step rule"],
   });
 }
 
-const metricsLocationAnswer = buildGlobalGuidanceAnswer("系统的metric在哪里看？", "zh", "/signals");
+const metricsLocationAnswer = buildGlobalGuidanceAnswer("Where can I see system metrics?", "en", "/signals");
 assert.ok(metricsLocationAnswer, "metrics location question should have global guidance");
 assert.ok(
   metricsLocationAnswer.includes("/admin/metrics"),
@@ -1070,13 +1070,13 @@ assert.ok(
 );
 
 assert.equal(
-  findGuidanceEntry("系统的metric在哪里看？", "/signals"),
+  findGuidanceEntry("Where can I see system metrics?", "/signals"),
   null,
   "metrics location question on /signals must not match signal workflow"
 );
 
 const metricsRagAnswer = buildMiniRagGuidanceResponse(
-  "系统的metric在哪里看？",
+  "Where can I see system metrics?",
   "/signals",
   "zh",
   "Ask what this page means or what to do next. I can suggest the next button and explain the current workflow step."
@@ -1087,7 +1087,7 @@ assert.equal(
   "mini-RAG must not use prior welcome text to turn a metrics question into signal workflow guidance"
 );
 
-const frictionWatchAnswer = buildGlobalGuidanceAnswer("我在问 friction watch 怎么处理？", "zh", "/signals");
+const frictionWatchAnswer = buildGlobalGuidanceAnswer("How should I handle friction watch?", "en", "/signals");
 assert.ok(frictionWatchAnswer, "friction watch question should have global guidance");
 assert.ok(
   frictionWatchAnswer.includes("Signals") && frictionWatchAnswer.includes("Friction / Watch"),
@@ -1102,7 +1102,7 @@ assert.ok(
   `friction watch answer must not fall back to signal workflow\n\nActual:\n${frictionWatchAnswer}`
 );
 
-const projectTakeawayAnswer = buildGlobalGuidanceAnswer("Project Takeaway candidate 应该去哪里 review?", "zh", "/manual");
+const projectTakeawayAnswer = buildGlobalGuidanceAnswer("Where should a Project Takeaway candidate be reviewed?", "en", "/manual");
 assert.ok(projectTakeawayAnswer, "project takeaway question should have global guidance");
 assert.ok(
   projectTakeawayAnswer.includes("Manual Upload") && projectTakeawayAnswer.includes("Project Takeaway"),
@@ -1113,7 +1113,7 @@ assert.ok(
   `project takeaway answer should point to review inbox and candidate boundary\n\nActual:\n${projectTakeawayAnswer}`
 );
 
-const manualSourceAnswer = buildGlobalGuidanceAnswer("manual upload source intent 是什么？", "zh", "/workspace/projects/review");
+const manualSourceAnswer = buildGlobalGuidanceAnswer("What does manual upload source intent mean?", "en", "/workspace/projects/review");
 assert.ok(manualSourceAnswer, "manual source question should have global guidance");
 assert.ok(
   manualSourceAnswer.includes("Project Review Inbox") && manualSourceAnswer.includes("Manual Source"),

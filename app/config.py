@@ -5,10 +5,10 @@ from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 
 
-# 项目根目录
+# Project root directory
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# 加载 .env
+# Load .env
 load_dotenv(BASE_DIR / ".env")
 
 
@@ -40,7 +40,7 @@ class Settings:
         self.log_level: str = os.getenv("LOG_LEVEL", "INFO")
 
     def validate(self) -> None:
-        """检查关键配置是否存在"""
+        """Check that required configuration is present."""
         missing = []
 
         if not self.openai_api_key:
