@@ -1,238 +1,234 @@
 # AI Radar
 
-AI Radar is an AI-native intelligence system for tracking the AI ecosystem and turning external signals into structured, decision-relevant intelligence.
+**An evidence-bounded AI intelligence system that turns fast-moving AI ecosystem signals into project-level judgment — without allowing weak evidence to become automatic action.**
 
-Core pipeline:
+[Live product](https://app.ai-radar-lab.com) · [Backend API](https://api.ai-radar-lab.com) · [Case study](docs/portfolio/CASE_STUDY.md) · [Architecture](docs/portfolio/ARCHITECTURE.md) · [Roadmap](ROADMAP.md)
+
+![Python](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688?logo=fastapi&logoColor=white)
+![Next.js](https://img.shields.io/badge/Frontend-Next.js-black?logo=next.js)
+![AWS](https://img.shields.io/badge/Cloud-AWS-232F3E?logo=amazonwebservices&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-green)
+
+> **Public portfolio snapshot:** application source code and selected architecture, governance, evaluation, and product documentation are included. Private runtime data, personal context, deployment operations, and the private repository's Git history are intentionally excluded.
+
+## Portfolio Overview
+
+| | |
+|---|---|
+| **Problem** | AI ecosystem information is fragmented, fast-moving, and often weakly verified. A feed can collect more information without improving decision quality. |
+| **What I built** | A live system that collects external signals, generates structured interpretations, maps them to active projects, and turns selected intelligence into reviewable judgment objects. |
+| **Core differentiator** | Claim-aware evidence classification and hard downstream-action gates prevent relevance, generated interpretation, or private reflection from being misrepresented as verified evidence. |
+| **Technical shape** | Python, FastAPI, Next.js, AWS ECS, S3, CloudFront, multi-provider LLM routing, structured prompt contracts, and file-backed state artifacts. |
+| **My ownership** | Product definition, architecture, trust boundaries, acceptance criteria, implementation direction, validation, and production operation. AI coding assistants are implementation tools; architecture and admission decisions remain human-owned. |
+
+## The 90-Second Story
+
+Most AI monitoring products stop at collection and summarisation. AI Radar was built around a harder question:
+
+> **When should generated intelligence be allowed to influence a real project decision?**
+
+The system separates four concepts that are often collapsed together:
+
+1. a source was observed;
+2. a model interpreted it;
+3. a claim is supported by traceable evidence;
+4. a human is willing to turn that claim into a project action.
+
+AI Radar preserves those boundaries through provenance metadata, claim-level verification, explicit source categories, blocked downstream actions, and auditable human override paths.
 
 ```text
-Signal -> Insight -> Trend -> Strategic Intelligence
+Signal -> Insight -> Trend -> Strategic Intelligence -> Decision -> Review -> Learning
 ```
 
-The product is extending that pipeline into a lightweight learning loop:
+## Core Workflow
+
+```mermaid
+flowchart LR
+    A[External sources] --> B[Collectors and manual intake]
+    B --> C[Normalisation and source metadata]
+    C --> D[Scoring and classification]
+    D --> E[Structured insight generation]
+    E --> F[Claim and evidence assessment]
+    F --> G[Project relevance mapping]
+    G --> H[Reviewable Project Takeaway]
+    H --> I{Human review}
+    I -->|Confirm| J[Decision context]
+    I -->|Watch| K[Follow-up observation]
+    I -->|Action| L[Action lifecycle]
+    I -->|Reject or dismiss| M[Bounded caution context]
+    J --> N[ReviewRecord and learning]
+    K --> N
+    L --> N
+    M --> N
+    F -. thin or unsupported evidence .-> O[Blocked downstream actions]
+```
+
+## What Makes It Different
+
+### Intelligence, not another feed
+
+Signals are normalised, interpreted, synthesised across time, and mapped to active projects. The product is designed to explain **why a development matters** and **what confidence is justified**, not only what was published.
+
+### Evidence-bounded AI
+
+AI Radar does not claim to automatically prove external information true. It classifies evidential status and uses that status to control downstream eligibility.
 
 ```text
-Strategic Intelligence -> Decision -> Review -> Learning
+Relevance is not support.
+Interpretation is not evidence.
+Reflection is not external fact.
+Human override is not silent automation.
 ```
 
-AI Radar is not a generic news reader, generic knowledge-management tool, Obsidian replacement, or GitHub project-management system. It is an intelligence engine built to help a user detect meaningful AI ecosystem signals early, understand why they matter, map them to active projects, and keep weak evidence from becoming overconfident downstream action.
+Key invariants:
 
-## Current Product Status
+- weak evidence may support investigation, but not automatic action;
+- empty verification metadata must not be labelled as verified insight;
+- `blocked_downstream_actions` are hard gates for automatic Project Takeaway and low-risk Action paths;
+- human overrides must be explicit, auditable, and exceptional;
+- rejected history may provide caution context, but cannot become claim support.
 
-AI Radar is live and usable.
+### Review and learning
 
-Production surfaces:
+Project Takeaways support Confirm, Reject, Dismiss, Watch, and Action outcomes. ReviewRecords, CalibrationEvents, follow-up observations, and trajectory events make it possible to examine how judgment changed over time.
 
-- Frontend: `https://app.ai-radar-lab.com`
-- Backend API: `https://api.ai-radar-lab.com`
+## Architecture at a Glance
 
-Working product paths include:
+```mermaid
+flowchart TB
+    subgraph Sources
+        RSS[Official and RSS-style sources]
+        GH[GitHub and community sources]
+        Manual[Manual PDF / image / text intake]
+    end
 
-- Signals
-- Radar / daily intelligence summaries
-- Workspace
-- Project Takeaways
-- Final Takeaway confirmation artifacts
-- Knowledge Synthesis
-- Subscriptions
-- Manual Upload / Manual Intelligence
-- AI Agent Watch
-- Friction Signals
-- Reflections
-- Project Trajectory / Review history
-- Dev Inbox / coding-agent handoff drafts
+    subgraph Pipeline
+        Collect[Collectors]
+        Normalise[Normalisation]
+        Score[Classification and scoring]
+        Generate[Insight and synthesis]
+        Verify[Evidence-bounded verification]
+        Match[Project relevance]
+    end
 
-## What AI Radar Does
+    subgraph Product
+        API[FastAPI backend on ECS]
+        Web[Next.js frontend on S3 + CloudFront]
+        Review[Review, Watch, Action and Learning]
+    end
 
-### Signal Intelligence
+    Store[(S3 and JSON-backed artifacts)]
+    Providers[Provider-routed LLM execution]
+    Control[Model policy, prompt registry and admission gates]
 
-AI Radar collects external AI ecosystem signals, normalizes them, classifies topics, scores importance, and preserves source metadata. Signals can come from RSS-style feeds, official announcements, GitHub/Hacker News/Product Hunt collectors, and manual uploads.
+    RSS --> Collect
+    GH --> Collect
+    Manual --> Collect
+    Collect --> Normalise --> Score --> Generate --> Verify --> Match
+    Generate <--> Providers
+    Control --> Generate
+    Control --> Verify
+    Normalise --> Store
+    Generate --> Store
+    Verify --> Store
+    Store <--> API
+    API <--> Web
+    Match --> Review
+    Review --> Store
+```
 
-### Insight Generation
+See [docs/portfolio/ARCHITECTURE.md](docs/portfolio/ARCHITECTURE.md) for the component and trust-boundary view.
 
-Signals are turned into structured interpretations that explain why a signal matters, how it maps to projects, and what kind of claim is being made. The system distinguishes direct observation, supported interpretation, inferred relevance, and speculative claims.
+## Product Surfaces
 
-### Strategic Synthesis
+| Surface | Purpose |
+|---|---|
+| **Signals** | Browse normalised source records and metadata. |
+| **Radar** | Review daily intelligence summaries and topic movement. |
+| **Workspace** | Connect intelligence to active projects and stored context. |
+| **Project Takeaways** | Review, watch, action, and learning surface for project-level judgment. |
+| **Final Takeaways** | Freeze a review bundle and create a human-confirmed artifact without bypassing verification gates. |
+| **Manual Intelligence** | Analyse user-provided PDF, image, HTML, Markdown, and text material. |
+| **AI Agent Watch** | Track agent-related repositories and ecosystem activity. |
+| **Friction Signals** | Identify adoption barriers, workflow pain points, and opportunity patterns. |
+| **Reflections** | Use long-horizon cognitive context without treating it as external evidence. |
+| **Dev Inbox** | Capture scoped bugs and coding-agent handoff drafts. |
 
-AI Radar synthesizes signals across time so the product does not collapse into a feed of isolated items. Radar outputs and topic summaries help identify momentum, rising themes, and decision-relevant patterns.
+## Engineering Evidence
 
-### Project Relevance
+| Area | Review path |
+|---|---|
+| Backend composition and startup controls | [`backend/app/main.py`](backend/app/main.py) |
+| API routes | [`backend/app/routes/`](backend/app/routes/) |
+| Domain and orchestration services | [`backend/app/services/`](backend/app/services/) |
+| Frontend application | [`frontend/app/`](frontend/app/) |
+| Daily ingestion | [`app/main_summary_v2.py`](app/main_summary_v2.py) |
+| Source collectors | [`signal_collectors/`](signal_collectors/) |
+| Prompt capability registry | [`backend/app/prompts/registry.py`](backend/app/prompts/registry.py) |
+| Architecture decisions | [`docs/adr/`](docs/adr/) |
+| Governance and evaluation | [`docs/governance/`](docs/governance/) and [`docs/evaluation/`](docs/evaluation/) |
+| Tests | [`tests/`](tests/) |
 
-Signals can be mapped to active projects such as AI Radar itself, GLAP, AI Cognitive OS, Trajectory Memory, and AI Property Intelligence. Project matching uses project descriptions, tags, stored context, GitHub context snapshots, manual project notes, and prior intelligence artifacts.
+## Selected Architecture Decisions
 
-### Project Takeaways
+- [ADR-0003 — Runtime-Agnostic Skill Registry](docs/adr/0003-runtime-agnostic-skill-registry.md)
+- [ADR-0009 — Model Provenance Schema](docs/adr/0009-model-provenance-schema.md)
+- [ADR-0010 — External Insight Admission Gate](docs/adr/0010-external-insight-admission-gate.md)
+- [ADR-0011 — Evidence Pack Source Excerpt Policy](docs/adr/0011-evidence-pack-source-excerpt-policy.md)
+- [ADR-0013 — AI Discussion Governed Claim Boundary](docs/adr/0013-ai-discussion-governed-claim-boundary.md)
+- [ADR-0015 — Claim-Set Composition Underdetermination Gate](docs/adr/0015-claim-set-composition-underdetermination-gate.md)
 
-Project Takeaways are the main review, watch, action, and learning surface. They convert intelligence into reviewable project-level judgment objects. Confirmed takeaways, watch states, action states, ReviewRecords, CalibrationEvents, and trajectory events form the action-learning loop.
+## Public Review Path
 
-### Final Takeaways
+1. Read this page for the product and system boundary.
+2. Read the [portfolio case study](docs/portfolio/CASE_STUDY.md) for the engineering narrative and trade-offs.
+3. Read [ADR-0010](docs/adr/0010-external-insight-admission-gate.md) for the admission-gate design.
+4. Inspect the backend composition, service layer, frontend, collectors, and prompt registry.
+5. Read the [roadmap](ROADMAP.md) to distinguish implemented foundations from future work.
 
-Signal Detail can turn a Completion Note into an Andy-confirmed Final Takeaway
-artifact by freezing a Review Bundle snapshot first. This creates durable
-confirmation provenance without automatically creating a Project Review
-candidate or bypassing verification gates.
+### Local execution boundary
 
-Review Bundle snapshots can include an External Synthesis Source from paste,
-markdown, plaintext, or HTML upload. This material is stored as review context,
-not verified external evidence, and confirmed artifacts restore the immutable
-snapshot on reload.
+This repository is a sanitised source snapshot, not a copy of the private production environment. No credentials or private data are required to inspect the source. Provider-backed, AWS-backed, upload, and production-equivalent flows require the operator to supply their own configuration and infrastructure.
 
-After confirmation, the operator can explicitly send the Final Takeaway to
-Project Review through the `confirmed_final_takeaway` provider. That handoff
-creates a Review Inbox candidate only through the normal Project Takeaway
-candidate policy/write path; low-risk Action and strong recommendation remain
-blocked unless a separate reviewed path allows them.
+The environment template is [`.env.example`](.env.example). A deterministic fixture-backed public demo mode is a planned portfolio improvement; until then, the live product and source-review paths are the most representative evaluation surfaces.
 
-### Verification and Evidence Boundaries
+## Repository Map
 
-AI Radar does not automatically prove that signals are true. It classifies evidential status and uses that classification to control downstream action eligibility.
-
-Important rules:
-
-- Weak evidence can be useful for relevance, but it should not become an automatic action.
-- Empty verification metadata must not be labeled as verified insight.
-- `blocked_downstream_actions` are hard gates for automatic Project Takeaway and low-risk Action paths.
-- Human override must be explicit, auditable, and exceptional.
-- Reflection content is cognitive context, not external factual evidence unless an explicit evidence-conversion path exists.
-- Rejected or dismissed review history can provide bounded caution context for future work, but it is not source evidence or claim support.
-
-### Reflection
-
-Reflection is a long-horizon cognitive layer. GitHub-backed reflections can be indexed and browsed, but AI Radar should not become the primary authoring source for deep reflection content.
-
-Reflection polish review keeps assistant-polished reflection drafts behind a
-human before/after checklist. Polished drafts are review context only until a
-separate reflection save path is used; they are not evidence, Project
-Takeaways, or Action eligibility signals.
-
-### Manual Intelligence
-
-Manual Upload supports PDF/image/text-style source analysis and recovers manual-session-derived signal context. This lets AI Radar ingest important user-provided material even when it did not originate in the automated collector pipeline.
-
-### AI Agent Watch
-
-AI Agent Watch monitors agent-related repositories and ecosystem signals through GitHub, Hacker News, Product Hunt, normalization, scoring, merge flow, and product surfaces. It is evolving from discovery-only monitoring toward lightweight repo tracking.
-
-### Friction Signals
-
-Friction Signals captures pain points, adoption barriers, workflow friction, and developer/user complaints from sources such as GitHub and Hacker News, then maps them into opportunity-oriented intelligence.
-
-### Dev Inbox
-
-Dev Inbox is a lightweight development intake surface for AI Radar itself. It captures scoped bugs, product ideas, and coding-agent handoff drafts, while keeping actual implementation in local Codex, VS Code, Codex Cloud, GitHub PRs, and CI rather than turning AI Radar into a browser IDE.
-
-## Architecture At A Glance
-
-Main layers:
-
-1. Collection and ingestion
-   - external signal collectors
-   - manual uploads
-   - source-specific normalization
-
-2. Signal and intelligence processing
-   - topic classification
-   - scoring
-   - insight generation
-   - trend synthesis
-   - project relevance mapping
-
-3. Quality and control
-   - model routing
-   - execution policy
-   - context strategy
-   - output validation
-   - verification and blocked-action gates
-   - prompt / skill registry discipline
-
-4. Product surfaces
-   - Signals
-   - Radar Summary
-   - Workspace
-   - Project Takeaways
-   - Knowledge
-   - Manual Upload
-   - Agent Watch
-   - Friction Signals
-   - Reflections
-   - Dev Inbox
-
-5. Action and learning loop
-   - decision candidates
-   - review inbox
-   - watch/action follow-up
-   - ReviewRecords
-   - CalibrationEvents
-   - trajectory timeline
-   - bounded caution context from rejected/dismissed review history
-
-## Technical Shape
-
-Major technologies and runtime patterns:
-
-- Python
-- FastAPI backend
-- Next.js frontend
-- JSON-backed local/state artifacts
-- AWS ECS backend deployment
-- S3 + CloudFront frontend deployment
-- provider-routed LLM execution
-- model routing and execution policy
-- prompt registry and skill-style prompt contracts
-
-Important entrypoints:
-
-- Backend API: `backend/app/main.py`
-- Backend routes: `backend/app/routes/`
-- Backend services: `backend/app/services/`
-- Frontend app: `frontend/app/`
-- Daily ingestion / orchestration: `app/main_summary_v2.py`
-- Source collectors: `signal_collectors/`
-- Agent collaboration protocols: `agent-skills/`
-
-## GitHub Project Context
-
-AI Radar can read project GitHub repositories to build lightweight project context snapshots. A project repo snapshot may include:
-
-- README and roadmap excerpts
-- top-level repository tree
-- recent commits
-- manifest files such as `package.json`, `requirements.txt`, `pyproject.toml`, or `Dockerfile`
-- lightweight architecture hints
-
-These snapshots are project context, not verification evidence. They help AI Radar discuss project relevance more accurately when a model API cannot browse GitHub directly.
+```text
+ai-radar-aws-public/
+├── app/                    # ingestion and summary orchestration
+├── backend/app/            # FastAPI routes, services, prompts and policies
+├── frontend/app/           # Next.js product UI
+├── signal_collectors/      # collectors and normalisation
+├── agent-skills/           # agent collaboration protocols
+├── tests/                  # unit, contract and integration-oriented tests
+├── docs/adr/               # architecture decision records
+├── docs/governance/        # governance boundaries
+├── docs/evaluation/        # evaluation design
+└── docs/portfolio/         # recruiter-facing case study and architecture
+```
 
 ## Current Development Focus
 
-Current active themes include:
+- strengthen Project Takeaway review, watch, action, and trajectory loops;
+- harden manual upload end to end;
+- improve project matching and knowledge quality;
+- strengthen verification metadata and held-out evaluation;
+- improve skill and prompt contract discipline;
+- preserve clear boundaries between generated context, verified evidence, and action eligibility.
 
-- stronger Project Takeaway review, watch, action, and trajectory loops
-- manual upload end-to-end hardening
-- project GitHub context snapshots
-- knowledge quality and project-match precision
-- lightweight development intake through Dev Inbox without replacing local
-  development workflows
-- reflection sync and matching quality
-- unified reasoning / verification boundaries
-- governance and evaluation scaffolds for invariants, bounded edits, edit apply
-  reports, metadata hardening audits, claim dependency audits, and held-out
-  insight evaluation
-- skills system hardening and prompt contract discipline
-- UI guidance and operator-facing workflow clarity
+See [ROADMAP.md](ROADMAP.md) for current direction.
 
-See `ROADMAP.md` for the current product roadmap.
+## Documentation
 
-## Documentation Map
-
-Useful docs:
-
-- `ROADMAP.md` - current project roadmap and development direction
-- `AI_RADAR_PRODUCT_SPEC.md` - product positioning and future-state product boundaries
-- `DEVELOPMENT_PLAN.md` - public planning boundary and roadmap pointer
-- `CURRENT_DEVELOPMENT_STATUS.md` - public status boundary and overview pointer
-- `AGENTS.md` - public coding-agent operating rules
-- `docs/README.md` - selected public documentation index
-- `PUBLIC_RELEASE_NOTES.md` - sanitization scope and pre-publication checklist
-
-For coding agents, `AGENTS.md` is the operating guide. This README is the public/project-level summary.
+- [Portfolio case study](docs/portfolio/CASE_STUDY.md)
+- [Portfolio architecture](docs/portfolio/ARCHITECTURE.md)
+- [Product specification](AI_RADAR_PRODUCT_SPEC.md)
+- [Roadmap](ROADMAP.md)
+- [Public documentation index](docs/README.md)
+- [Architecture decisions](docs/adr/README.md)
+- [Public release notes](PUBLIC_RELEASE_NOTES.md)
 
 ## License
 
