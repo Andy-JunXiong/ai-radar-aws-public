@@ -1,0 +1,148 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-radar-lab.local/schemas/source-excerpt-preservation-contract.v1.json",
+  "title": "AI Radar Source Excerpt Preservation Contract Report",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "report_boundary",
+    "contract",
+    "summary",
+    "findings"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "source_excerpt_preservation_contract.v1"
+    },
+    "report_boundary": {
+      "type": "object",
+      "required": [
+        "mode",
+        "writes_data",
+        "runs_ingestion",
+        "hard_enforcement",
+        "not_for"
+      ],
+      "properties": {
+        "mode": {
+          "const": "read_only_static_contract_check"
+        },
+        "writes_data": {
+          "const": false
+        },
+        "runs_ingestion": {
+          "const": false
+        },
+        "hard_enforcement": {
+          "const": false
+        },
+        "not_for": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        }
+      },
+      "additionalProperties": true
+    },
+    "contract": {
+      "type": "object",
+      "required": [
+        "adr",
+        "canonical_field",
+        "max_source_excerpt_chars",
+        "required_paths"
+      ],
+      "properties": {
+        "adr": {
+          "const": "docs/adr/0011-evidence-pack-source-excerpt-policy.md"
+        },
+        "canonical_field": {
+          "const": "source_excerpt"
+        },
+        "max_source_excerpt_chars": {
+          "const": 1200
+        },
+        "required_paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 3
+        }
+      },
+      "additionalProperties": true
+    },
+    "summary": {
+      "type": "object",
+      "required": [
+        "finding_count",
+        "error_count",
+        "warning_count",
+        "code_counts",
+        "readiness"
+      ],
+      "properties": {
+        "finding_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "error_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "warning_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "code_counts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "readiness": {
+          "enum": [
+            "contract_ok",
+            "contract_gap_found"
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "code",
+          "severity",
+          "path",
+          "message"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "severity": {
+            "enum": [
+              "error",
+              "warning",
+              "info"
+            ]
+          },
+          "path": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

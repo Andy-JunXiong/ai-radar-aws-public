@@ -1,0 +1,140 @@
+---
+title: "ADR-001 - Signal ingestion as durable observation records"
+layer: signal
+status: accepted
+nature: retrospective
+date: 2026-05-06
+---
+
+## Context
+
+AI Radar needs a reliable observation layer before it can generate insight,
+verification, project takeaways, or review records. The current system receives
+signals from multiple shapes of source:
+
+- RSS and curated source feeds
+- official AI ecosystem updates
+- GitHub, Hacker News, and Product Hunt agent sources
+- GitHub and Hacker News friction sources
+- subscription settings that filter, boost, or block source/topic priority
+- manual upload sessions that can be promoted into signal records
+
+The product already uses Signals, Radar, Workspace, Project Takeaways,
+Subscriptions, and the daily ingestion pipeline in production. Signal ingestion
+therefore cannot be a demo-only feed. It must preserve enough source metadata,
+topic context, scoring, provenance, and operational telemetry for downstream
+layers to make cautious judgments.
+
+## Decision
+
+AI Radar keeps Signal ingestion as a collector-first observation layer that
+writes durable JSON artifacts and exposes them through the Signals API.
+
+The ingestion path is:
+
+1. Scheduled pipeline execution runs collector stages.
+2. Collectors write source-specific signal outputs.
+3. Merge and enrichment steps normalize source metadata, topic, score,
+   subscription priority, and processing tier.
+4. Manual sessions can be promoted into manual signal records without pretending
+   they came from external feeds.
+5. Latest and historical artifacts are stored as S3-backed JSON outputs.
+6. FastAPI routes serve Signals and Signal Detail to the frontend.
+7. Metrics events record collector runs, pipeline runs, artifact writes, LLM
+   usage, and verification activity.
+
+This keeps the Signal layer boring on purpose. It is not where AI Radar proves a
+claim, decides a project action, or turns private reflection into evidence. It
+is where the system preserves observations well enough for later verification
+and review.
+
+## Owns
+
+- collector execution
+- source-specific signal outputs
+- source metadata and provenance
+- topic, score, subscription priority, and processing tier
+- manual-promoted signal records
+- latest and historical signal artifacts
+- signal, collector, and pipeline metrics visibility
+
+## Does Not Own
+
+- claim-level verification; that belongs to Insight
+- private cognitive context; that belongs to Reflection
+- topic movement synthesis; that belongs to Knowledge Engine
+- project review outcomes; that belongs to Project Engine
+
+## Current Implementation
+
+Current implementation points include:
+
+- `app/main_summary_v2.py` orchestrates collector execution, subscription
+  filtering, topic attachment, processing-tier selection, insight generation,
+  output writes, S3 upload, and metrics recording.
+- `signal_collectors/` contains RSS, official, GitHub agent, Hacker News agent,
+  Product Hunt agent, GitHub friction, Hacker News friction, and merge logic.
+- `app/intelligence/manual_signal_promotion.py` promotes saved manual sessions
+  into signal-like records when appropriate.
+- `backend/app/routes/signals.py` serves collected and manual signal records,
+  Signal Detail, manual-session fallback, related reflections, and insight
+  generation flows.
+- `backend/app/services/subscription_settings_service.py` and the pipeline
+  subscription helpers apply source and topic preferences.
+- `backend/app/services/metrics_event_service.py` and
+  `backend/app/services/metrics_summary_service.py` provide operational
+  visibility over collector, pipeline, signal, LLM, and verification activity.
+
+## Consequences
+
+- Signals can be inspected independently of generated insight quality.
+- Manual uploads can enter the observation layer with explicit manual
+  provenance.
+- The system can diagnose signal activity separately from collector and pipeline
+  execution gaps.
+- Downstream layers can gate actions using VerifiedInsight and review records
+  instead of treating raw signal volume as product value.
+- Production deployment can stay simple: scheduled ingestion writes artifacts,
+  and the frontend reads through stable backend routes.
+- JSON artifact compatibility matters because multiple frontend and backend
+  surfaces read the same output family.
+- Collector-specific source quirks must be normalized before downstream
+  ranking, topic analysis, and verification can trust the record shape.
+- Missing telemetry can make data look stale even when signal artifacts exist,
+  so metrics and diagnostics need to stay close to ingestion.
+
+## Alternatives considered
+
+### Database-first ingestion
+
+Rejected for now. A database-first signal store could improve querying later,
+but the current system already runs on S3-backed latest/history artifacts and
+FastAPI routes. Moving ingestion persistence into a database would be an
+architecture migration, not a small Signal layer correction.
+
+### Lambda-per-source collectors
+
+Rejected for the current stage. The repo and deployment model currently center
+on the scheduled ingestion task. Splitting every collector into separate Lambda
+functions would increase operational surface area before the product needs that
+granularity.
+
+### Iceberg or warehouse-first storage
+
+Rejected for now. Signal volume and current product workflows do not justify a
+warehouse-first storage layer. JSON artifacts plus metrics summaries are enough
+for the current Signals, Radar, Workspace, and Project Takeaway flows.
+
+### Treat manual uploads as reflections only
+
+Rejected. Manual uploads often contain source material that should be analyzed
+and reviewed like a signal, but they must retain manual provenance. Promoting
+manual sessions into signal records gives the product a single Signal Detail and
+Project Takeaway path without hiding the source type.
+
+## Follow-up
+
+Keep this ADR synchronized with the active ingestion reality. If the project
+later moves to a database-backed signal store, source-specific scheduled
+workers, or warehouse-style historical querying, this ADR should be superseded
+instead of silently stretched.

@@ -1,0 +1,94 @@
+version: 1
+status: experimental
+owner: admin-operator
+created: 2026-05-19
+last_reviewed_at: 2026-05-19
+source_adr: docs/adr/0006-operator-guidance-layer.md
+description: >
+  Phase 2 hand-maintained operator guidance map. This file is admin/operator
+  guidance, not product runtime state, not evidence, and not verified insight.
+  Keep entries small and grounded in real operator friction.
+
+entry_schema:
+  required_fields:
+    - state_identifier
+    - state_label
+    - consumer
+    - applies_when
+    - next_actions
+    - governing_sources
+    - last_reviewed_at
+  notes:
+    - Citation creates traceability, not verification.
+    - Guidance entries must not bypass Project Takeaway or low-risk Action gates.
+    - Future user-facing guidance requires separate wording and permission review.
+
+entries:
+  - state_identifier: manual_source.completed_to_project_memory
+    state_label: Manual-source intelligence completed into project memory
+    consumer: admin_operator
+    status: active
+    applies_when:
+      - A manual upload or manual link source has generated insight.
+      - The source has moved through Signal Detail or Manual Detail completion.
+      - The operator needs to know what to inspect next.
+    next_actions:
+      - Inspect the completed Signal Detail or Manual Detail source preview.
+      - Confirm the durable Workspace record preserves manual-source identity.
+      - Inspect the related Project Takeaway candidate before Confirm, Watch, Action, Reject, or Dismiss.
+      - Check Review Records and Trajectory for manual-source contribution after review.
+    not_allowed:
+      - Do not treat the manual source as factual evidence for external claims unless verification metadata supports that use.
+      - Do not skip Signal Detail, Workspace, or Project Takeaway gates because the source was manually selected.
+    governing_sources:
+      - AGENTS.md#Intelligence-Quality-Boundaries
+      - DEVELOPMENT_PLAN.md#Trajectory-Memory
+      - docs/adr/0006-operator-guidance-layer.md
+      - backend/app/routes/signals.py
+    last_reviewed_at: 2026-05-19
+
+  - state_identifier: verified_insight.blocked_downstream_actions_present
+    state_label: Verified insight has blocked downstream actions
+    consumer: admin_operator
+    status: active
+    applies_when:
+      - A signal, insight, candidate, or review object exposes blocked_downstream_actions.
+      - The operator is deciding whether a Project Takeaway or low-risk Action path is allowed.
+    next_actions:
+      - Read the visible gate note or verification summary before choosing an outcome.
+      - Prefer Watch or further review when evidence is partial, inferred, unsupported, contradicted, or not verifiable.
+      - Use only the explicit override-confirm or override-action path if an exceptional human override is needed.
+      - Record the reviewer note and expected outcome when using an override path.
+    not_allowed:
+      - Do not use ordinary Confirm or Action paths to bypass blocked_downstream_actions.
+      - Do not label missing or empty verification metadata as verified_insight.
+      - Do not treat fallback LLM explanation as evidence or claim support.
+    governing_sources:
+      - AGENTS.md#Intelligence-Quality-Boundaries
+      - DEVELOPMENT_PLAN.md#Unified-Reasoning--Verification-Layer
+      - backend/app/services/verified_insight_service.py
+      - backend/app/services/project_takeaway_constants.py
+    last_reviewed_at: 2026-05-19
+
+  - state_identifier: knowledge_convergence.review_candidate_pending
+    state_label: Knowledge convergence candidate is pending review
+    consumer: admin_operator
+    status: active
+    applies_when:
+      - A Knowledge convergence brief has been sent to Review Inbox.
+      - The candidate is marked as knowledge_convergence or knowledge_convergence_review_candidate.
+      - The operator is deciding whether the convergence should become reusable project intelligence.
+    next_actions:
+      - Inspect the Knowledge context panel and matched project fit before acting.
+      - Check source count, shared topic overlap, project match reason, and evidence profile.
+      - Use Watch when the convergence is promising but still needs stronger project fit or evidence.
+      - Keep low-risk Action blocked unless further verified evidence or explicit override supports action.
+    not_allowed:
+      - Do not treat Knowledge convergence as automatic action evidence.
+      - Do not create reusable project memory from generic topic overlap alone.
+      - Do not hide missing project fit behind a Confirm outcome.
+    governing_sources:
+      - DEVELOPMENT_PLAN.md#Agent-Watch--Friction-Signals-Convergence
+      - AGENTS.md#Intelligence-Quality-Boundaries
+      - docs/adr/0006-operator-guidance-layer.md
+    last_reviewed_at: 2026-05-19

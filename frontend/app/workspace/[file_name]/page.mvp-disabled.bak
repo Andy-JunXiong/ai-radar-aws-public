@@ -1,0 +1,684 @@
+"use client";
+
+import Image from "next/image";
+import Link from "next/link";
+import { useEffect, useState } from "react";
+import { useParams, useRouter } from "next/navigation";
+import { apiUrl } from "@/lib/api";
+
+type WorkspaceItem = {
+  file_name: string;
+  saved_at?: string;
+  source_type?: string;
+  content_type?: string;
+  topic?: string;
+  signal_id?: string;
+  signal_title?: string;
+  selected_model?: string;
+  user_input?: string;
+  ai_response?: string;
+  final_reflection?: string;
+  signal_summary?: string;
+  why_it_matters?: string;
+  relevance_to_projects?: string | Record<string, unknown>;
+  relevance_to_career?: string;
+  synthesized_insight?: string;
+  reflection_context?: string;
+  image_url?: string;
+  image_file_name?: string;
+  image_metadata_url?: string;
+  image_metadata_file_name?: string;
+  visual_style?: string;
+  visual_direction?: string;
+  chat_messages?: Array<{
+    role?: string;
+    content?: string;
+  }>;
+  chat_message_count?: number;
+};
+
+function normalizeText(value?: unknown): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function parseJsonStringObject(value?: unknown): Record<string, string> | null {
+  if (value === null || value === undefined) return null;
+
+  if (typeof value === "object" && !Array.isArray(value)) {
+    const result: Record<string, string> = {};
+
+    for (const [key, val] of Object.entries(value)) {
+      const normalized = normalizeText(val).trim();
+      if (normalized) {
+        result[key] = normalized;
+      }
+    }
+
+    return Object.keys(result).length > 0 ? result : null;
+  }
+
+  const normalizedValue = normalizeText(value).trim();
+  if (!normalizedValue) return null;
+
+  try {
+    const parsed = JSON.parse(normalizedValue);
+
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const result: Record<string, string> = {};
+
+      for (const [key, val] of Object.entries(parsed)) {
+        result[key] =
+          typeof val === "string" ? val : JSON.stringify(val, null, 2);
+      }
+
+      return result;
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+function renderTextBlock(value?: string) {
+  const normalizedValue = normalizeText(value).trim();
+  if (!normalizedValue) return null;
+
+  return (
+    <div
+      style={{
+        lineHeight: "1.8",
+        whiteSpace: "pre-wrap",
+        fontSize: "15px",
+        color: "#374151",
+      }}
+    >
+      {normalizedValue}
+    </div>
+  );
+}
+
+function renderHighlightedBlock(value?: unknown) {
+  const normalizedValue = normalizeText(value).trim();
+  if (!normalizedValue) return null;
+
+  return (
+    <div
+      style={{
+        lineHeight: "1.8",
+        whiteSpace: "pre-wrap",
+        fontSize: "15px",
+        color: "#333",
+        padding: "16px",
+        borderRadius: "12px",
+        background: "#fafafa",
+        border: "1px solid #eee",
+      }}
+    >
+      {normalizedValue}
+    </div>
+  );
+}
+
+function renderProjectMap(value?: unknown) {
+  if (value === null || value === undefined) return null;
+
+  const parsed = parseJsonStringObject(value);
+
+  if (!parsed) {
+    return renderHighlightedBlock(value);
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+      {Object.entries(parsed).map(([project, takeaway]) => (
+        <div
+          key={project}
+          style={{
+            padding: "14px 16px",
+            borderRadius: "12px",
+            background: "#fafafa",
+            border: "1px solid #eee",
+          }}
+        >
+          <div
+            style={{
+              fontSize: "12px",
+              fontWeight: 700,
+              marginBottom: "8px",
+              textTransform: "uppercase",
+              letterSpacing: "0.4px",
+              color: "#1d4ed8",
+            }}
+          >
+            {project}
+          </div>
+
+          <div
+            style={{
+              lineHeight: "1.8",
+              whiteSpace: "pre-wrap",
+              fontSize: "15px",
+              color: "#374151",
+            }}
+          >
+            {takeaway}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export default function WorkspaceDetailPage() {
+  const params = useParams();
+  const router = useRouter();
+  const fileName = decodeURIComponent(params.file_name as string);
+
+  const [item, setItem] = useState<WorkspaceItem | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch(
+      apiUrl(`/workspace_history/${encodeURIComponent(fileName)}`)
+    )
+      .then((res) => res.json())
+      .then((data) => {
+        setItem(data.item || null);
+      })
+      .catch((error) => {
+        console.error("Failed to load workspace item:", error);
+        setItem(null);
+      })
+      .finally(() => {
+        setLoading(false);
+      });
+  }, [fileName]);
+
+  const handleDelete = async () => {
+    const confirmed = window.confirm(
+      "Are you sure you want to delete this workspace record?"
+    );
+    if (!confirmed) return;
+
+    try {
+      const res = await fetch(
+        apiUrl(`/workspace_history/${encodeURIComponent(fileName)}`),
+        {
+          method: "DELETE",
+        }
+      );
+
+      const data = await res.json();
+
+      if (res.ok && data.message?.includes("successfully")) {
+        alert("Workspace record deleted successfully.");
+        router.push("/workspace");
+      } else {
+        alert(data.message || "Failed to delete workspace record.");
+      }
+    } catch (error) {
+      console.error("Delete workspace item failed:", error);
+      alert("Failed to delete workspace record.");
+    }
+  };
+
+  if (loading) {
+    return (
+      <main
+        style={{
+          paddingTop: "32px",
+          paddingLeft: "20px",
+          paddingRight: "20px",
+          fontFamily: "Arial",
+          maxWidth: "1000px",
+          margin: "0 auto",
+        }}
+      >
+        Loading workspace item...
+      </main>
+    );
+  }
+
+  if (!item) {
+    return (
+      <main
+        style={{
+          paddingTop: "32px",
+          paddingLeft: "20px",
+          paddingRight: "20px",
+          fontFamily: "Arial",
+          maxWidth: "1000px",
+          margin: "0 auto",
+        }}
+      >
+        <Link
+          href="/workspace"
+          style={{
+            textDecoration: "none",
+            color: "#374151",
+            fontSize: "14px",
+            fontWeight: 600,
+          }}
+        >
+          ← Back to Workspace
+        </Link>
+
+        <div style={{ marginTop: "20px" }}>Workspace item not found.</div>
+      </main>
+    );
+  }
+
+  return (
+    <main
+      style={{
+        paddingTop: "32px",
+        paddingBottom: "48px",
+        paddingLeft: "20px",
+        paddingRight: "20px",
+        fontFamily: "Arial",
+        maxWidth: "1000px",
+        margin: "0 auto",
+      }}
+    >
+      <div style={{ marginBottom: "12px" }}>
+        <Link
+          href="/workspace"
+          style={{
+            textDecoration: "none",
+            color: "#374151",
+            fontSize: "14px",
+            fontWeight: 600,
+          }}
+        >
+          ← Back to Workspace
+        </Link>
+      </div>
+
+      <button
+        onClick={handleDelete}
+        style={{
+          padding: "10px 16px",
+          borderRadius: "10px",
+          border: "1px solid #f0b4b4",
+          background: "#fff5f5",
+          color: "#b42318",
+          cursor: "pointer",
+          marginBottom: "20px",
+          fontSize: "14px",
+          fontWeight: 600,
+        }}
+      >
+        Delete Record
+      </button>
+
+      <div
+        style={{
+          border: "1px solid #ddd",
+          borderRadius: "16px",
+          padding: "24px",
+          background: "#fff",
+          boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+        }}
+      >
+        <div
+          style={{
+            fontSize: "12px",
+            color: "#666",
+            marginBottom: "8px",
+            textTransform: "uppercase",
+            letterSpacing: "0.4px",
+          }}
+        >
+          {item.saved_at || "No timestamp"}
+        </div>
+
+        <h1
+          style={{
+            marginTop: 0,
+            marginBottom: "16px",
+            fontSize: "30px",
+            lineHeight: "1.3",
+            color: "#111827",
+          }}
+        >
+          {item.signal_title || "Untitled signal"}
+        </h1>
+
+        {item.selected_model && (
+          <p
+            style={{
+              marginTop: 0,
+              marginBottom: "8px",
+              color: "#444",
+              fontSize: "14px",
+            }}
+          >
+            Model: {item.selected_model}
+          </p>
+        )}
+
+        {(item.content_type || item.topic) && (
+          <div
+            style={{
+              display: "flex",
+              gap: "10px",
+              flexWrap: "wrap",
+              marginBottom: "8px",
+            }}
+          >
+            {item.content_type ? (
+              <span
+                style={{
+                  fontSize: "12px",
+                  padding: "6px 10px",
+                  borderRadius: "999px",
+                  background: "#f3f4f6",
+                  color: "#374151",
+                  border: "1px solid #e5e7eb",
+                }}
+              >
+                Content: {item.content_type}
+              </span>
+            ) : null}
+
+            {item.topic ? (
+              <span
+                style={{
+                  fontSize: "12px",
+                  padding: "6px 10px",
+                  borderRadius: "999px",
+                  background: "#eef6ff",
+                  color: "#1d4ed8",
+                  border: "1px solid #bfdbfe",
+                }}
+              >
+                Topic: {item.topic}
+              </span>
+            ) : null}
+          </div>
+        )}
+
+        {item.image_url && (
+          <section style={{ marginTop: "28px" }}>
+            <h3
+              style={{
+                marginBottom: "10px",
+                fontSize: "20px",
+                color: "#111827",
+              }}
+            >
+              Visual Preview
+            </h3>
+
+            <div
+              style={{
+                border: "1px solid #e5e7eb",
+                borderRadius: "14px",
+                overflow: "hidden",
+                background: "#f9fafb",
+              }}
+            >
+              <Image
+                src={apiUrl(item.image_url)}
+                alt={item.signal_title || "Workspace visual"}
+                width={1600}
+                height={1000}
+                unoptimized
+                style={{ display: "block", width: "100%", height: "auto" }}
+              />
+            </div>
+
+            <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", marginTop: "12px" }}>
+              <a
+                href={apiUrl(item.image_url)}
+                target="_blank"
+                rel="noreferrer"
+                style={{
+                  textDecoration: "none",
+                  color: "#111827",
+                  fontSize: "14px",
+                  fontWeight: 600,
+                }}
+              >
+                Open image
+              </a>
+              {item.image_metadata_url ? (
+                <a
+                  href={apiUrl(item.image_metadata_url)}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{
+                    textDecoration: "none",
+                    color: "#374151",
+                    fontSize: "14px",
+                    fontWeight: 600,
+                  }}
+                >
+                  Open metadata
+                </a>
+              ) : null}
+            </div>
+
+            {(item.visual_style || item.visual_direction) && (
+              <div
+                style={{
+                  marginTop: "12px",
+                  padding: "14px 16px",
+                  borderRadius: "12px",
+                  background: "#fafafa",
+                  border: "1px solid #eee",
+                }}
+              >
+                {item.visual_style ? (
+                  <div style={{ fontSize: "14px", color: "#374151", marginBottom: item.visual_direction ? "8px" : 0 }}>
+                    Visual style: {item.visual_style}
+                  </div>
+                ) : null}
+                {item.visual_direction ? (
+                  <div style={{ fontSize: "14px", color: "#374151", whiteSpace: "pre-wrap", lineHeight: "1.7" }}>
+                    {item.visual_direction}
+                  </div>
+                ) : null}
+              </div>
+            )}
+          </section>
+        )}
+
+        {Array.isArray(item.chat_messages) && item.chat_messages.length > 0 && (
+          <section style={{ marginTop: "28px" }}>
+            <h3
+              style={{
+                marginBottom: "10px",
+                fontSize: "20px",
+                color: "#111827",
+              }}
+            >
+              Conversation History
+            </h3>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+              {item.chat_messages.map((message, index) => {
+                const isUser = message.role === "user";
+                return (
+                  <div
+                    key={`${message.role || "unknown"}-${index}`}
+                    style={{
+                      alignSelf: isUser ? "flex-end" : "flex-start",
+                      maxWidth: "92%",
+                      padding: "14px 16px",
+                      borderRadius: "14px",
+                      background: isUser ? "#111827" : "#f9fafb",
+                      color: isUser ? "#fff" : "#374151",
+                      border: isUser ? "1px solid #111827" : "1px solid #e5e7eb",
+                      whiteSpace: "pre-wrap",
+                      lineHeight: "1.7",
+                      fontSize: "14px",
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: "11px",
+                        textTransform: "uppercase",
+                        letterSpacing: "0.4px",
+                        marginBottom: "8px",
+                        opacity: 0.8,
+                        fontWeight: 700,
+                      }}
+                    >
+                      {isUser ? "User" : "Assistant"}
+                    </div>
+                    {message.content || ""}
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
+        {item.reflection_context && (
+          <section style={{ marginTop: "28px" }}>
+            <h3
+              style={{
+                marginBottom: "10px",
+                fontSize: "20px",
+                color: "#111827",
+              }}
+            >
+              Reflection Context
+            </h3>
+            {renderHighlightedBlock(item.reflection_context)}
+          </section>
+        )}
+
+        {item.signal_summary && (
+          <section style={{ marginTop: "28px" }}>
+            <h3
+              style={{
+                marginBottom: "10px",
+                fontSize: "20px",
+                color: "#111827",
+              }}
+            >
+              Signal Summary
+            </h3>
+            {renderTextBlock(item.signal_summary)}
+          </section>
+        )}
+
+        {item.why_it_matters && (
+          <section style={{ marginTop: "28px" }}>
+            <h3
+              style={{
+                marginBottom: "10px",
+                fontSize: "20px",
+                color: "#111827",
+              }}
+            >
+              Why It Matters
+            </h3>
+            {renderTextBlock(item.why_it_matters)}
+          </section>
+        )}
+
+        {item.relevance_to_projects && (
+          <section style={{ marginTop: "28px" }}>
+            <h3
+              style={{
+                marginBottom: "10px",
+                fontSize: "20px",
+                color: "#111827",
+              }}
+            >
+              Project Takeaways
+            </h3>
+            {renderProjectMap(item.relevance_to_projects)}
+          </section>
+        )}
+
+        {item.relevance_to_career && (
+          <section style={{ marginTop: "28px" }}>
+            <h3
+              style={{
+                marginBottom: "10px",
+                fontSize: "20px",
+                color: "#111827",
+              }}
+            >
+              Career Takeaway
+            </h3>
+            {renderHighlightedBlock(item.relevance_to_career)}
+          </section>
+        )}
+
+        {item.synthesized_insight && (
+          <section style={{ marginTop: "28px" }}>
+            <h3
+              style={{
+                marginBottom: "10px",
+                fontSize: "20px",
+                color: "#111827",
+              }}
+            >
+              Strategic Insight
+            </h3>
+            {renderHighlightedBlock(item.synthesized_insight)}
+          </section>
+        )}
+
+        {item.final_reflection && (
+          <section style={{ marginTop: "28px" }}>
+            <h3
+              style={{
+                marginBottom: "10px",
+                fontSize: "20px",
+                color: "#111827",
+              }}
+            >
+              My Reflection
+            </h3>
+            {renderHighlightedBlock(item.final_reflection)}
+          </section>
+        )}
+
+        {item.user_input && (
+          <section style={{ marginTop: "28px" }}>
+            <h3
+              style={{
+                marginBottom: "10px",
+                fontSize: "20px",
+                color: "#111827",
+              }}
+            >
+              Last User Prompt
+            </h3>
+            {renderHighlightedBlock(item.user_input)}
+          </section>
+        )}
+
+        {item.ai_response && (
+          <section style={{ marginTop: "28px" }}>
+            <h3
+              style={{
+                marginBottom: "10px",
+                fontSize: "20px",
+                color: "#111827",
+              }}
+            >
+              Last AI Response
+            </h3>
+            {renderHighlightedBlock(item.ai_response)}
+          </section>
+        )}
+      </div>
+    </main>
+  );
+}

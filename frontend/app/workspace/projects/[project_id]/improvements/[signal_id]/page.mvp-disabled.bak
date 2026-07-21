@@ -1,0 +1,1115 @@
+"use client";
+
+import Link from "next/link";
+import { useParams } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
+
+import AppContainer from "@/components/AppContainer";
+import PageHeader from "@/components/PageHeader";
+import RequireAdminAuth from "@/components/RequireAdminAuth";
+import { API_BASE, apiUrl } from "@/lib/api";
+
+type ChatMessage = {
+  role: "user" | "assistant";
+  content: string;
+};
+
+type ModelKey = "claude" | "chatgpt" | "perplexity";
+type UiTab = "Claude" | "ChatGPT" | "Perplexity";
+
+type ProjectItem = {
+  project_id: string;
+  name?: string;
+  description?: string;
+  status?: string;
+  repo?: string;
+  current_state?: string;
+  roadmap?: string;
+  topics?: string[];
+};
+
+type GithubDocument = {
+  path?: string;
+  html_url?: string;
+  content?: string;
+  sha?: string;
+};
+
+type GithubContext = {
+  status?: string;
+  repository?: {
+    full_name?: string;
+    html_url?: string;
+    default_branch?: string;
+  } | null;
+  readme?: GithubDocument | null;
+  roadmap?: GithubDocument | null;
+};
+
+type ProjectImprovementItem = {
+  signal_id?: string;
+  signal_title?: string;
+  signal_summary?: string;
+  takeaway?: string;
+  source_takeaway?: string;
+  why_it_matters?: string;
+  fit_reason?: string;
+  benefits?: string;
+  final_reflection?: string;
+  status?: string;
+  suggested_stage?: string;
+  readme_update_suggestion?: string;
+  roadmap_update_suggestion?: string;
+  readme_review?: string;
+  roadmap_review?: string;
+  updated_readme?: string;
+  updated_roadmap?: string;
+  baseline_readme_sha?: string;
+  baseline_roadmap_sha?: string;
+  documents_generated_at?: string;
+  score?: number;
+  should_apply?: boolean;
+  saved_at?: string;
+  confirmed_at?: string;
+  github_submission?: {
+    repo?: string;
+    branch?: string;
+    default_branch?: string;
+    readme_path?: string | null;
+    roadmap_path?: string | null;
+    compare_url?: string;
+    pull_request_url?: string;
+    submitted_at?: string;
+  };
+};
+
+type ProjectContextResponse = {
+  project?: ProjectItem;
+  github?: GithubContext;
+  cache?: {
+    repo?: string;
+    fetched_at?: string;
+  };
+};
+
+type ProjectImprovementResponse = {
+  project?: ProjectItem;
+  item?: ProjectImprovementItem;
+  updated_at?: string;
+  detail?: string;
+};
+
+type PersistedHistoryResponse = {
+  models?: Record<string, { messages?: ChatMessage[] }>;
+};
+
+function safeText(value?: string | null, fallback = "") {
+  return (value || "").trim() || fallback;
+}
+
+function formatScore(value?: number) {
+  if (typeof value !== "number" || Number.isNaN(value)) return "n/a";
+  return `${Math.max(0, Math.min(100, Math.round(value)))}/100`;
+}
+
+function renderStatus(status?: string) {
+  const normalized = safeText(status).toLowerCase();
+  if (!normalized) return "new";
+  return normalized.replaceAll("_", " ");
+}
+
+function shortSha(value?: string | null) {
+  const text = safeText(value);
+  if (!text) return "n/a";
+  return text.slice(0, 7);
+}
+
+function formatTimestamp(value?: string | null) {
+  const text = safeText(value);
+  if (!text) return "";
+  const parsed = new Date(text);
+  if (Number.isNaN(parsed.getTime())) return text;
+  return parsed.toLocaleString();
+}
+
+function buildHighlightedLines(original?: string | null, updated?: string | null) {
+  const originalLines = safeText(original).split("\n");
+  const updatedLines = safeText(updated).split("\n");
+
+  return updatedLines.map((line, index) => {
+    const originalLine = originalLines[index];
+    const changed = originalLine !== line;
+    return {
+      line,
+      changed,
+    };
+  });
+}
+
+function DocumentDiffPreview({
+  original,
+  updated,
+  emptyMessage,
+}: {
+  original?: string | null;
+  updated?: string | null;
+  emptyMessage: string;
+}) {
+  const text = safeText(updated);
+  const highlightedLines = useMemo(() => buildHighlightedLines(original, updated), [original, updated]);
+
+  if (!text) {
+    return <pre style={scrollingPreStyle}>{emptyMessage}</pre>;
+  }
+
+  return (
+    <div style={documentDiffStyle}>
+      {highlightedLines.map((item, index) => (
+        <div
+          key={`${index}-${item.line}`}
+          style={{
+            ...documentLineStyle,
+            background: item.changed ? "#fff7ed" : "transparent",
+            fontWeight: item.changed ? 700 : 400,
+            borderLeft: item.changed ? "3px solid #f97316" : "3px solid transparent",
+          }}
+        >
+          {item.line || " "}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ChatWindow({ messages, loading }: { messages: ChatMessage[]; loading: boolean }) {
+  return (
+    <div
+      style={{
+        border: "1px solid #e5e7eb",
+        borderRadius: "12px",
+        background: "#fff",
+        height: "320px",
+        overflowY: "auto",
+        padding: "12px",
+      }}
+    >
+      {messages.length === 0 ? (
+        <div style={{ color: "#6b7280", fontSize: "14px" }}>
+          No conversation yet.
+        </div>
+      ) : (
+        messages.map((msg, index) => (
+          <div
+            key={`${msg.role}-${index}`}
+            style={{
+              display: "flex",
+              justifyContent: msg.role === "user" ? "flex-end" : "flex-start",
+              marginBottom: "10px",
+            }}
+          >
+            <div
+              style={{
+                maxWidth: "92%",
+                whiteSpace: "pre-wrap",
+                lineHeight: 1.6,
+                fontSize: "14px",
+                padding: "10px 12px",
+                borderRadius: "12px",
+                background: msg.role === "user" ? "#111827" : "#f9fafb",
+                color: msg.role === "user" ? "#fff" : "#111827",
+                border: msg.role === "user" ? "1px solid #111827" : "1px solid #e5e7eb",
+              }}
+            >
+              {msg.content}
+            </div>
+          </div>
+        ))
+      )}
+
+      {loading ? <div style={{ color: "#6b7280", fontSize: "14px", marginTop: "8px" }}>Thinking...</div> : null}
+    </div>
+  );
+}
+
+function DetailBlock({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div style={detailBlockStyle}>
+      <div style={detailTitleStyle}>{title}</div>
+      <div style={{ marginTop: "8px", fontSize: "14px", lineHeight: "1.8", color: "#374151", whiteSpace: "pre-wrap" }}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+export default function ProjectImprovementDetailPage() {
+  const params = useParams<{ project_id: string; signal_id: string }>();
+  const projectId = decodeURIComponent(params.project_id);
+  const signalId = decodeURIComponent(params.signal_id);
+  const improvementChatId = `project-improvement-${projectId}-${signalId}`;
+
+  const [project, setProject] = useState<ProjectItem | null>(null);
+  const [github, setGithub] = useState<GithubContext | null>(null);
+  const [improvement, setImprovement] = useState<ProjectImprovementItem | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState("");
+  const [confirming, setConfirming] = useState(false);
+  const [reopening, setReopening] = useState(false);
+  const [refreshingFit, setRefreshingFit] = useState(false);
+  const [generatingReviews, setGeneratingReviews] = useState(false);
+  const [generatingDocuments, setGeneratingDocuments] = useState(false);
+  const [submittingGithub, setSubmittingGithub] = useState(false);
+
+  const [activeTab, setActiveTab] = useState<UiTab>("ChatGPT");
+  const [claudeInput, setClaudeInput] = useState("");
+  const [claudeLoading, setClaudeLoading] = useState(false);
+  const [claudeMessages, setClaudeMessages] = useState<ChatMessage[]>([]);
+  const [chatgptInput, setChatgptInput] = useState("");
+  const [chatgptLoading, setChatgptLoading] = useState(false);
+  const [chatgptMessages, setChatgptMessages] = useState<ChatMessage[]>([]);
+  const [perplexityInput, setPerplexityInput] = useState("");
+  const [perplexityLoading, setPerplexityLoading] = useState(false);
+  const [perplexityMessages, setPerplexityMessages] = useState<ChatMessage[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadData() {
+      setLoading(true);
+      setErrorMessage("");
+      try {
+        const [contextRes, improvementRes] = await Promise.all([
+          fetch(apiUrl(`/projects/${encodeURIComponent(projectId)}/github-context/refresh`), {
+            method: "POST",
+            cache: "no-store",
+          }),
+          fetch(apiUrl(`/projects/${encodeURIComponent(projectId)}/improvements/${encodeURIComponent(signalId)}`), {
+            cache: "no-store",
+          }),
+        ]);
+
+        const contextData = (await contextRes.json().catch(() => null)) as ProjectContextResponse | null;
+        const improvementData = (await improvementRes.json().catch(() => null)) as ProjectImprovementResponse | null;
+
+        if (!contextRes.ok) {
+          throw new Error("Failed to load project context.");
+        }
+        if (!improvementRes.ok) {
+          throw new Error(improvementData?.detail || "Failed to load project improvement.");
+        }
+
+        if (!cancelled) {
+          setProject(contextData?.project || null);
+          setGithub(contextData?.github || null);
+          setImprovement(improvementData?.item || null);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setErrorMessage(error instanceof Error ? error.message : "Failed to load project improvement detail.");
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    void loadData();
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, signalId]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadPersistedChats() {
+      try {
+        const response = await fetch(`${API_BASE}/workspace_chat_history/${encodeURIComponent(improvementChatId)}`);
+        if (!response.ok) return;
+
+        const data = (await response.json().catch(() => null)) as PersistedHistoryResponse | null;
+        if (cancelled) return;
+
+        const models = data?.models || {};
+        if (Array.isArray(models.claude?.messages)) setClaudeMessages(models.claude.messages);
+        if (Array.isArray(models.chatgpt?.messages)) setChatgptMessages(models.chatgpt.messages);
+        if (Array.isArray(models.perplexity?.messages)) setPerplexityMessages(models.perplexity.messages);
+      } catch {
+        // keep quiet in dev UI
+      }
+    }
+
+    void loadPersistedChats();
+    return () => {
+      cancelled = true;
+    };
+  }, [improvementChatId]);
+
+  async function persistHistory(model: ModelKey, messages: ChatMessage[]) {
+    try {
+      await fetch(`${API_BASE}/workspace_chat_history`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model,
+          signal_id: improvementChatId,
+          signal_title: `${project?.name || projectId} improvement: ${improvement?.signal_title || signalId}`,
+          signal_summary: improvement?.signal_summary || "",
+          why_it_matters: improvement?.why_it_matters || "",
+          relevance_to_projects: improvement?.takeaway || "",
+          relevance_to_career: "",
+          synthesized_insight: [improvement?.benefits, improvement?.roadmap_update_suggestion].filter(Boolean).join("\n\n"),
+          reflection: [
+            `Project name: ${project?.name || ""}`,
+            `Project description: ${project?.description || ""}`,
+            `Current project situation: ${project?.current_state || ""}`,
+            `Manual roadmap: ${project?.roadmap || ""}`,
+            `Personal context is already provided by the backend analysis context. Use it together with the project documents below.`,
+            `GitHub README context: ${safeText(github?.readme?.content)}`,
+            `GitHub roadmap context: ${safeText(github?.roadmap?.content)}`,
+          ].join("\n\n"),
+          messages,
+        }),
+      });
+    } catch {
+      // keep local state even if persistence fails
+    }
+  }
+
+  async function sendToModel(model: ModelKey) {
+    const isClaude = model === "claude";
+    const isChatGPT = model === "chatgpt";
+    const isPerplexity = model === "perplexity";
+
+    const input = isClaude ? claudeInput : isChatGPT ? chatgptInput : perplexityInput;
+    const trimmedInput = input.trim();
+    if (!trimmedInput || !improvement) return;
+
+    const existingMessages = isClaude
+      ? claudeMessages
+      : isChatGPT
+        ? chatgptMessages
+        : perplexityMessages;
+
+    const optimisticMessages: ChatMessage[] = [...existingMessages, { role: "user", content: trimmedInput }];
+
+    if (isClaude) {
+      setClaudeMessages(optimisticMessages);
+      setClaudeInput("");
+      setClaudeLoading(true);
+    } else if (isChatGPT) {
+      setChatgptMessages(optimisticMessages);
+      setChatgptInput("");
+      setChatgptLoading(true);
+    } else {
+      setPerplexityMessages(optimisticMessages);
+      setPerplexityInput("");
+      setPerplexityLoading(true);
+    }
+
+    try {
+      const response = await fetch(`${API_BASE}/workspace_chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model,
+          message: trimmedInput,
+          signal_title: `${project?.name || projectId} improvement: ${improvement.signal_title || signalId}`,
+          signal_summary: improvement.signal_summary || "",
+          why_it_matters: improvement.why_it_matters || "",
+          relevance_to_projects: [
+            `Project takeaway: ${improvement.takeaway || ""}`,
+            `Project fit reason: ${improvement.fit_reason || ""}`,
+            `Suggested stage: ${improvement.suggested_stage || ""}`,
+          ].join("\n"),
+          relevance_to_career: "",
+          synthesized_insight: [
+            `Project benefit: ${improvement.benefits || ""}`,
+            `README update suggestion: ${improvement.readme_update_suggestion || ""}`,
+            `Roadmap update suggestion: ${improvement.roadmap_update_suggestion || ""}`,
+            `Context note: ${safeText(github?.readme?.content) ? "README content is loaded and should be used when proposing documentation updates." : "README is not loaded yet."}`,
+          ].join("\n"),
+          reflection: [
+            `Important instruction: read the personal context, current project situation, README context, and roadmap context before answering.`,
+            `Project description: ${project?.description || ""}`,
+            `Current project situation: ${project?.current_state || ""}`,
+            `Manual roadmap: ${project?.roadmap || ""}`,
+            `GitHub README context: ${safeText(github?.readme?.content)}`,
+            `GitHub roadmap context: ${safeText(github?.roadmap?.content)}`,
+            `Discussion goal: explain the implication of this improvement for the project, identify key benefits, and suggest exactly what part of the README or roadmap should be updated.`,
+          ].join("\n\n"),
+        }),
+      });
+
+      const data = (await response.json().catch(() => null)) as { reply?: string } | null;
+      const reply = safeText(data?.reply, "No reply returned.");
+      const nextMessages: ChatMessage[] = [...optimisticMessages, { role: "assistant", content: reply }];
+
+      if (isClaude) {
+        setClaudeMessages(nextMessages);
+      } else if (isChatGPT) {
+        setChatgptMessages(nextMessages);
+      } else {
+        setPerplexityMessages(nextMessages);
+      }
+      await persistHistory(model, nextMessages);
+    } catch {
+      const nextMessages: ChatMessage[] = [
+        ...optimisticMessages,
+        {
+          role: "assistant",
+          content: "The model request failed. Check the backend service or the related API key, then try again.",
+        },
+      ];
+      if (isClaude) {
+        setClaudeMessages(nextMessages);
+      } else if (isChatGPT) {
+        setChatgptMessages(nextMessages);
+      } else {
+        setPerplexityMessages(nextMessages);
+      }
+      await persistHistory(model, nextMessages);
+    } finally {
+      if (isClaude) setClaudeLoading(false);
+      if (isChatGPT) setChatgptLoading(false);
+      if (isPerplexity) setPerplexityLoading(false);
+    }
+  }
+
+  async function handleConfirm() {
+    if (!improvement?.signal_id) return;
+    setConfirming(true);
+    setErrorMessage("");
+    try {
+      const response = await fetch(
+        apiUrl(`/projects/${encodeURIComponent(projectId)}/improvements/${encodeURIComponent(improvement.signal_id)}/confirm`),
+        { method: "POST" }
+      );
+      const data = (await response.json().catch(() => null)) as { item?: ProjectImprovementItem; detail?: string } | null;
+      if (!response.ok) {
+        throw new Error(data?.detail || `Failed to confirm improvement (${response.status})`);
+      }
+      setImprovement((current) => ({ ...(current || {}), ...(data?.item || {}) }));
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Failed to confirm this improvement.");
+    } finally {
+      setConfirming(false);
+    }
+  }
+
+  async function handleReopen() {
+    if (!improvement?.signal_id) return;
+    setReopening(true);
+    setErrorMessage("");
+    try {
+      const response = await fetch(
+        apiUrl(`/projects/${encodeURIComponent(projectId)}/improvements/${encodeURIComponent(improvement.signal_id)}/reopen`),
+        { method: "POST" }
+      );
+      const data = (await response.json().catch(() => null)) as { item?: ProjectImprovementItem; detail?: string } | null;
+      if (!response.ok) {
+        throw new Error(data?.detail || `Failed to reopen improvement (${response.status})`);
+      }
+      setImprovement((current) => ({ ...(current || {}), ...(data?.item || {}) }));
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Failed to reopen this improvement.");
+    } finally {
+      setReopening(false);
+    }
+  }
+
+  async function handleRefreshFit() {
+    if (!improvement?.signal_id) return;
+    setRefreshingFit(true);
+    setErrorMessage("");
+    try {
+      const response = await fetch(
+        apiUrl(`/projects/${encodeURIComponent(projectId)}/improvements/${encodeURIComponent(improvement.signal_id)}/refresh-fit`),
+        { method: "POST" }
+      );
+      const data = (await response.json().catch(() => null)) as { item?: ProjectImprovementItem; detail?: string } | null;
+      if (!response.ok) {
+        throw new Error(data?.detail || `Failed to refresh fit analysis (${response.status})`);
+      }
+      setImprovement((current) => ({ ...(current || {}), ...(data?.item || {}) }));
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Failed to refresh project fit analysis.");
+    } finally {
+      setRefreshingFit(false);
+    }
+  }
+
+  async function handleGenerateDraftReviews() {
+    if (!improvement?.signal_id) return;
+    setGeneratingReviews(true);
+    setErrorMessage("");
+    try {
+      const response = await fetch(
+        apiUrl(`/projects/${encodeURIComponent(projectId)}/improvements/${encodeURIComponent(improvement.signal_id)}/draft-reviews`),
+        { method: "POST" }
+      );
+      const data = (await response.json().catch(() => null)) as { item?: ProjectImprovementItem; detail?: string } | null;
+      if (!response.ok) {
+        throw new Error(data?.detail || `Failed to generate draft reviews (${response.status})`);
+      }
+      setImprovement((current) => ({ ...(current || {}), ...(data?.item || {}) }));
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Failed to generate README / roadmap reviews.");
+    } finally {
+      setGeneratingReviews(false);
+    }
+  }
+
+  async function handleGenerateUpdatedDocuments() {
+    if (!improvement?.signal_id) return;
+    setGeneratingDocuments(true);
+    setErrorMessage("");
+    try {
+      const response = await fetch(
+        apiUrl(`/projects/${encodeURIComponent(projectId)}/improvements/${encodeURIComponent(improvement.signal_id)}/generate-documents`),
+        { method: "POST" }
+      );
+      const data = (await response.json().catch(() => null)) as { item?: ProjectImprovementItem; detail?: string } | null;
+      if (!response.ok) {
+        throw new Error(data?.detail || `Failed to generate updated documents (${response.status})`);
+      }
+      setImprovement((current) => ({ ...(current || {}), ...(data?.item || {}) }));
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Failed to generate updated documents.");
+    } finally {
+      setGeneratingDocuments(false);
+    }
+  }
+
+  async function handleSubmitGithub() {
+    if (!improvement?.signal_id) return;
+    setSubmittingGithub(true);
+    setErrorMessage("");
+    try {
+      const response = await fetch(
+        apiUrl(`/projects/${encodeURIComponent(projectId)}/improvements/${encodeURIComponent(improvement.signal_id)}/submit-github`),
+        { method: "POST" }
+      );
+      const data = (await response.json().catch(() => null)) as { item?: ProjectImprovementItem; detail?: string } | null;
+      if (!response.ok) {
+        throw new Error(data?.detail || `Failed to submit to GitHub (${response.status})`);
+      }
+      setImprovement((current) => ({ ...(current || {}), ...(data?.item || {}) }));
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Failed to submit to GitHub.");
+    } finally {
+      setSubmittingGithub(false);
+    }
+  }
+
+  const currentMessages =
+    activeTab === "Claude" ? claudeMessages : activeTab === "ChatGPT" ? chatgptMessages : perplexityMessages;
+  const currentInput =
+    activeTab === "Claude" ? claudeInput : activeTab === "ChatGPT" ? chatgptInput : perplexityInput;
+  const currentLoading =
+    activeTab === "Claude" ? claudeLoading : activeTab === "ChatGPT" ? chatgptLoading : perplexityLoading;
+  const currentReadme = safeText(github?.readme?.content);
+  const currentGithubRoadmap = safeText(github?.roadmap?.content);
+  const currentManualRoadmap = safeText(project?.roadmap);
+  const currentRoadmapBaseline = currentGithubRoadmap || currentManualRoadmap;
+  const latestReadmeSha = safeText(github?.readme?.sha);
+  const latestRoadmapSha = safeText(github?.roadmap?.sha);
+  const baselineReadmeSha = safeText(improvement?.baseline_readme_sha);
+  const baselineRoadmapSha = safeText(improvement?.baseline_roadmap_sha);
+  const documentsGeneratedAt = formatTimestamp(improvement?.documents_generated_at);
+  const isConfirmed = improvement?.status === "confirmed";
+  const readmeDraftOutdated = Boolean(
+    safeText(improvement?.updated_readme) && baselineReadmeSha && latestReadmeSha && baselineReadmeSha !== latestReadmeSha
+  );
+  const roadmapDraftOutdated = Boolean(
+    safeText(improvement?.updated_roadmap) && baselineRoadmapSha && latestRoadmapSha && baselineRoadmapSha !== latestRoadmapSha
+  );
+  const draftOutdated = readmeDraftOutdated || roadmapDraftOutdated;
+
+  return (
+    <AppContainer>
+      <RequireAdminAuth>
+        <PageHeader
+          title={improvement?.signal_title || "Project Improvement Detail"}
+          description="Discuss this improvement in the context of one project, understand its key benefits, and decide how it should change the README or roadmap."
+        />
+
+        <div style={{ marginBottom: "20px", display: "flex", gap: "14px", flexWrap: "wrap" }}>
+          <Link href="/workspace/projects" style={toolbarLinkStyle}>
+            Back to Project Takeaways
+          </Link>
+          <Link href={`/workspace/projects/${encodeURIComponent(projectId)}`} style={toolbarLinkStyle}>
+            Back to Project Detail
+          </Link>
+        </div>
+
+        {loading ? (
+          <div style={{ color: "#6b7280" }}>Loading improvement detail...</div>
+        ) : errorMessage && !improvement ? (
+          <div style={errorCardStyle}>{errorMessage}</div>
+        ) : (
+          <div style={{ display: "grid", gridTemplateColumns: "1.1fr 0.9fr", gap: "20px", alignItems: "start" }}>
+            <div style={{ display: "grid", gap: "16px" }}>
+              <section style={panelStyle}>
+                <div style={eyebrowStyle}>Project Improvement</div>
+                <div style={{ fontSize: "28px", fontWeight: 800, color: "#111827" }}>
+                  {improvement?.signal_title || "Untitled improvement"}
+                </div>
+                <div style={{ marginTop: "12px", display: "flex", gap: "10px", flexWrap: "wrap" }}>
+                  <span style={chipStyle}>Project: {project?.name || projectId}</span>
+                  <span style={chipStyle}>Score: {formatScore(improvement?.score)}</span>
+                  {improvement?.status ? <span style={chipStyle}>{renderStatus(improvement.status)}</span> : null}
+                  {improvement?.suggested_stage ? <span style={chipStyle}>Stage: {improvement.suggested_stage}</span> : null}
+                </div>
+                {improvement?.signal_summary ? (
+                  <div style={{ marginTop: "14px", fontSize: "14px", lineHeight: "1.8", color: "#4b5563" }}>
+                    {improvement.signal_summary}
+                  </div>
+                ) : null}
+              </section>
+
+              <DetailBlock title="Project Match">
+                {improvement?.fit_reason || "No fit explanation has been generated yet."}
+              </DetailBlock>
+
+              <DetailBlock title="Key Benefit">
+                {improvement?.benefits || "No explicit project benefit has been generated yet."}
+              </DetailBlock>
+
+              <DetailBlock title="Project Takeaway">
+                {improvement?.takeaway || "No project takeaway text was saved."}
+              </DetailBlock>
+
+              <DetailBlock title="Recommended Updates">
+                {[
+                  safeText(improvement?.roadmap_update_suggestion)
+                    ? `Roadmap placement:\n${safeText(improvement?.roadmap_update_suggestion)}`
+                    : "",
+                  safeText(improvement?.readme_update_suggestion)
+                    ? `README update:\n${safeText(improvement?.readme_update_suggestion)}`
+                    : "",
+                ]
+                  .filter(Boolean)
+                  .join("\n\n") || "No README or roadmap update suggestion has been generated yet."}
+              </DetailBlock>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+                <DetailBlock title="README Review Draft">
+                  {improvement?.readme_review || "No README review draft has been generated yet."}
+                </DetailBlock>
+                <DetailBlock title="Roadmap Review Draft">
+                  {improvement?.roadmap_review || "No roadmap review draft has been generated yet."}
+                </DetailBlock>
+              </div>
+
+              <section style={panelStyle}>
+                <div style={sectionTitleStyle}>Updated README Preview</div>
+                <div style={{ marginTop: "8px", fontSize: "13px", color: "#64748b", lineHeight: "1.7" }}>
+                  Changed lines are highlighted in orange and bold so you can review what will be written.
+                </div>
+                <div style={{ marginTop: "10px", display: "flex", gap: "10px", flexWrap: "wrap" }}>
+                  <span style={chipStyle}>Draft built from GitHub version: {shortSha(baselineReadmeSha)}</span>
+                  <span style={chipStyle}>Current GitHub version: {shortSha(latestReadmeSha)}</span>
+                  {documentsGeneratedAt ? <span style={chipStyle}>Generated at: {documentsGeneratedAt}</span> : null}
+                  {readmeDraftOutdated ? (
+                    <span style={{ ...chipStyle, background: "#fef2f2", color: "#b91c1c", border: "1px solid #fecaca" }}>
+                      Outdated draft
+                    </span>
+                  ) : null}
+                </div>
+                <DocumentDiffPreview
+                  original={currentReadme}
+                  updated={improvement?.updated_readme}
+                  emptyMessage="Generate updated documents to preview the new README."
+                />
+              </section>
+
+              <section style={panelStyle}>
+                <div style={sectionTitleStyle}>Updated Roadmap Preview</div>
+                <div style={{ marginTop: "8px", fontSize: "13px", color: "#64748b", lineHeight: "1.7" }}>
+                  Changed lines are highlighted in orange and bold so you can review what will be written.
+                </div>
+                <div style={{ marginTop: "10px", display: "flex", gap: "10px", flexWrap: "wrap" }}>
+                  <span style={chipStyle}>Draft built from GitHub version: {shortSha(baselineRoadmapSha)}</span>
+                  <span style={chipStyle}>Current GitHub version: {shortSha(latestRoadmapSha)}</span>
+                  {documentsGeneratedAt ? <span style={chipStyle}>Generated at: {documentsGeneratedAt}</span> : null}
+                  {roadmapDraftOutdated ? (
+                    <span style={{ ...chipStyle, background: "#fef2f2", color: "#b91c1c", border: "1px solid #fecaca" }}>
+                      Outdated draft
+                    </span>
+                  ) : null}
+                </div>
+                <DocumentDiffPreview
+                  original={currentRoadmapBaseline}
+                  updated={improvement?.updated_roadmap}
+                  emptyMessage="Generate updated documents to preview the new roadmap."
+                />
+              </section>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+                <section style={panelStyle}>
+                  <div style={sectionTitleStyle}>Current Project Situation</div>
+                  <pre style={preStyle}>{safeText(project?.current_state) || "No manual project situation saved yet."}</pre>
+                </section>
+                <section style={panelStyle}>
+                  <div style={sectionTitleStyle}>Manual Roadmap</div>
+                  <pre style={preStyle}>{safeText(project?.roadmap) || "No manual roadmap saved yet."}</pre>
+                </section>
+              </div>
+
+              <section style={panelStyle}>
+                <div style={sectionTitleStyle}>README Context</div>
+                <div style={{ marginTop: "8px", fontSize: "13px", color: "#64748b", lineHeight: "1.7" }}>
+                  This section is part of the context passed into the LLM discussion.
+                </div>
+                <pre style={scrollingPreStyle}>{safeText(github?.readme?.content) || "No README content available yet."}</pre>
+              </section>
+
+              <section style={panelStyle}>
+                <div style={sectionTitleStyle}>Roadmap Context</div>
+                <div style={{ marginTop: "8px", fontSize: "13px", color: "#64748b", lineHeight: "1.7" }}>
+                  This section is also passed into the LLM discussion so the model can reason about where the improvement belongs.
+                </div>
+                <pre style={scrollingPreStyle}>{safeText(github?.roadmap?.content) || "No GitHub roadmap content available yet."}</pre>
+              </section>
+            </div>
+
+            <div style={{ display: "grid", gap: "16px", position: "sticky", top: "20px" }}>
+              <section style={panelStyle}>
+                <div style={sectionTitleStyle}>Decision</div>
+                <div style={{ marginTop: "10px", fontSize: "14px", lineHeight: "1.8", color: "#4b5563" }}>
+                  Discuss this improvement with a model first if you want. When you are comfortable with the
+                  project fit and update direction, confirm it here.
+                </div>
+                {errorMessage ? <div style={{ ...errorCardStyle, marginTop: "14px" }}>{errorMessage}</div> : null}
+                <div style={{ marginTop: "14px", display: "flex", gap: "12px", flexWrap: "wrap" }}>
+                  <button
+                    type="button"
+                    onClick={() => void handleRefreshFit()}
+                    disabled={refreshingFit || isConfirmed}
+                    style={refreshingFit || isConfirmed ? disabledButtonStyle : secondaryButtonStyle}
+                  >
+                    {refreshingFit ? "Refreshing..." : "Refresh Fit Analysis"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleGenerateDraftReviews()}
+                    disabled={generatingReviews || isConfirmed}
+                    style={generatingReviews || isConfirmed ? disabledButtonStyle : secondaryButtonStyle}
+                  >
+                    {generatingReviews ? "Generating..." : "Generate README / Roadmap Reviews"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleGenerateUpdatedDocuments()}
+                    disabled={generatingDocuments || isConfirmed}
+                    style={generatingDocuments || isConfirmed ? disabledButtonStyle : secondaryButtonStyle}
+                  >
+                    {generatingDocuments ? "Generating..." : "Generate Updated README / Roadmap"}
+                  </button>
+                  {!isConfirmed ? (
+                    <button type="button" onClick={() => void handleConfirm()} disabled={confirming} style={primaryButtonStyle}>
+                      {confirming ? "Confirming..." : "Confirm Improvement"}
+                    </button>
+                  ) : (
+                    <>
+                      <span style={{ ...chipStyle, background: "#ecfdf3", color: "#166534", border: "1px solid #bbf7d0" }}>
+                        Confirmed
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => void handleReopen()}
+                        disabled={reopening}
+                        style={secondaryButtonStyle}
+                      >
+                        {reopening ? "Reopening..." : "Reopen Improvement"}
+                      </button>
+                    </>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => void handleSubmitGithub()}
+                    disabled={
+                      submittingGithub ||
+                      draftOutdated ||
+                      improvement?.status !== "confirmed" ||
+                      (!safeText(improvement?.updated_readme) && !safeText(improvement?.updated_roadmap))
+                    }
+                    style={
+                      improvement?.status === "confirmed" &&
+                      !draftOutdated &&
+                      (safeText(improvement?.updated_readme) || safeText(improvement?.updated_roadmap))
+                        ? primaryButtonStyle
+                        : disabledButtonStyle
+                    }
+                    title="This creates or updates files on a safe branch so you can review the compare page on GitHub."
+                  >
+                    {submittingGithub ? "Submitting..." : "Submit to GitHub"}
+                  </button>
+                </div>
+                <div style={contextNoticeStyle}>
+                  Submit to GitHub follows this order: refresh fit if needed, generate updated documents, review the highlighted
+                  README and roadmap here, confirm the improvement, then submit. The backend writes to a safe branch instead of
+                  pushing directly to the default branch.
+                </div>
+                {isConfirmed ? (
+                  <div style={contextNoticeStyle}>
+                    This improvement is already confirmed, so the generation buttons are locked. You can still review the drafts,
+                    continue the LLM discussion, or submit the approved update to GitHub.
+                  </div>
+                ) : null}
+                {draftOutdated ? (
+                  <div style={{ ...contextNoticeStyle, background: "#fef2f2", color: "#b91c1c", border: "1px solid #fecaca" }}>
+                    Your generated draft is older than the latest GitHub document. Refresh GitHub context and regenerate the
+                    updated README / roadmap before submitting.
+                  </div>
+                ) : null}
+                {improvement?.github_submission?.compare_url ? (
+                  <div style={{ ...contextNoticeStyle, background: "#ecfdf3", color: "#166534", border: "1px solid #bbf7d0" }}>
+                    Submitted on branch <strong>{improvement.github_submission.branch}</strong>.{" "}
+                    <a href={improvement.github_submission.compare_url} target="_blank" rel="noreferrer" style={{ color: "#166534", fontWeight: 700 }}>
+                      Open GitHub compare view
+                    </a>
+                    {improvement.github_submission.pull_request_url ? (
+                      <>
+                        {" "}or{" "}
+                        <a href={improvement.github_submission.pull_request_url} target="_blank" rel="noreferrer" style={{ color: "#166534", fontWeight: 700 }}>
+                          Open Pull Request
+                        </a>
+                      </>
+                    ) : null}
+                  </div>
+                ) : null}
+              </section>
+
+              <section style={panelStyle}>
+                <div style={sectionTitleStyle}>LLM Discussion</div>
+                <div style={{ marginTop: "8px", fontSize: "14px", color: "#64748b", lineHeight: "1.7" }}>
+                  Use ChatGPT, Claude, or Perplexity to discuss this improvement for this project, its key benefits,
+                  and how to update the README or roadmap.
+                </div>
+                <div style={contextNoticeStyle}>
+                  The model discussion already includes your personal context, current project situation, manual roadmap,
+                  GitHub README context, and GitHub roadmap context.
+                </div>
+
+                <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "14px", marginBottom: "14px" }}>
+                  {(["Claude", "ChatGPT", "Perplexity"] as UiTab[]).map((tab) => {
+                    const active = activeTab === tab;
+                    return (
+                      <button
+                        key={tab}
+                        type="button"
+                        onClick={() => setActiveTab(tab)}
+                        style={{
+                          padding: "8px 12px",
+                          borderRadius: "10px",
+                          border: active ? "1px solid #111827" : "1px solid #d1d5db",
+                          background: active ? "#111827" : "#fff",
+                          color: active ? "#fff" : "#111827",
+                          cursor: "pointer",
+                        }}
+                      >
+                        {tab}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <ChatWindow messages={currentMessages} loading={currentLoading} />
+
+                <textarea
+                  value={currentInput}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    if (activeTab === "Claude") setClaudeInput(value);
+                    if (activeTab === "ChatGPT") setChatgptInput(value);
+                    if (activeTab === "Perplexity") setPerplexityInput(value);
+                  }}
+                  placeholder={`Ask ${activeTab} how this improvement should shape the project, README, or roadmap...`}
+                  style={chatInputStyle}
+                />
+
+                <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", marginTop: "12px" }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (activeTab === "Claude") void sendToModel("claude");
+                      if (activeTab === "ChatGPT") void sendToModel("chatgpt");
+                      if (activeTab === "Perplexity") void sendToModel("perplexity");
+                    }}
+                    disabled={currentLoading || !improvement}
+                    style={primaryButtonStyle}
+                  >
+                    {currentLoading ? "Sending..." : `Send to ${activeTab}`}
+                  </button>
+                </div>
+              </section>
+            </div>
+          </div>
+        )}
+      </RequireAdminAuth>
+    </AppContainer>
+  );
+}
+
+const toolbarLinkStyle = {
+  textDecoration: "none",
+  color: "#374151",
+  fontSize: "14px",
+  fontWeight: 600,
+} as const;
+
+const panelStyle = {
+  border: "1px solid #e5e7eb",
+  borderRadius: "16px",
+  background: "#fff",
+  padding: "20px",
+  boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+} as const;
+
+const eyebrowStyle = {
+  fontSize: "12px",
+  color: "#6b7280",
+  marginBottom: "8px",
+  textTransform: "uppercase" as const,
+  letterSpacing: "0.5px",
+  fontWeight: 700,
+} as const;
+
+const sectionTitleStyle = {
+  fontSize: "22px",
+  lineHeight: "1.2",
+  fontWeight: 700,
+  color: "#111827",
+} as const;
+
+const chipStyle = {
+  display: "inline-flex",
+  alignItems: "center",
+  padding: "5px 10px",
+  borderRadius: "999px",
+  border: "1px solid #d1d5db",
+  background: "#ffffff",
+  fontSize: "12px",
+  color: "#374151",
+  fontWeight: 600,
+} as const;
+
+const preStyle = {
+  marginTop: "10px",
+  padding: "16px",
+  borderRadius: "12px",
+  background: "#f8fafc",
+  border: "1px solid #eef2f7",
+  whiteSpace: "pre-wrap" as const,
+  fontSize: "13px",
+  lineHeight: "1.7",
+  color: "#334155",
+  overflowX: "auto" as const,
+} as const;
+
+const scrollingPreStyle = {
+  ...preStyle,
+  height: "320px",
+  overflowY: "auto" as const,
+} as const;
+
+const documentDiffStyle = {
+  marginTop: "10px",
+  padding: "16px",
+  borderRadius: "12px",
+  background: "#f8fafc",
+  border: "1px solid #eef2f7",
+  height: "320px",
+  overflowY: "auto" as const,
+  overflowX: "auto" as const,
+  fontSize: "13px",
+  lineHeight: "1.8",
+  color: "#334155",
+  whiteSpace: "pre-wrap" as const,
+  fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, monospace",
+} as const;
+
+const documentLineStyle = {
+  padding: "2px 8px",
+  marginLeft: "-8px",
+  marginRight: "-8px",
+} as const;
+
+const primaryButtonStyle = {
+  padding: "10px 14px",
+  borderRadius: "10px",
+  border: "1px solid #111827",
+  background: "#111827",
+  color: "#ffffff",
+  cursor: "pointer",
+  fontWeight: 700,
+} as const;
+
+const secondaryButtonStyle = {
+  padding: "10px 14px",
+  borderRadius: "10px",
+  border: "1px solid #d1d5db",
+  background: "#ffffff",
+  color: "#111827",
+  cursor: "pointer",
+  fontWeight: 600,
+} as const;
+
+const disabledButtonStyle = {
+  padding: "10px 14px",
+  borderRadius: "10px",
+  border: "1px solid #d1d5db",
+  background: "#f3f4f6",
+  color: "#9ca3af",
+  cursor: "not-allowed",
+  fontWeight: 600,
+} as const;
+
+const detailBlockStyle = {
+  border: "1px solid #e5e7eb",
+  borderRadius: "14px",
+  background: "#fafafa",
+  padding: "16px",
+} as const;
+
+const detailTitleStyle = {
+  fontSize: "13px",
+  fontWeight: 700,
+  color: "#1f2937",
+  textTransform: "uppercase" as const,
+  letterSpacing: "0.4px",
+} as const;
+
+const errorCardStyle = {
+  border: "1px solid #fecaca",
+  borderRadius: "16px",
+  padding: "14px 16px",
+  background: "#fff1f2",
+  color: "#be123c",
+} as const;
+
+const chatInputStyle = {
+  width: "100%",
+  minHeight: "96px",
+  resize: "vertical" as const,
+  borderRadius: "10px",
+  border: "1px solid #d1d5db",
+  padding: "12px",
+  fontFamily: "Arial",
+  fontSize: "14px",
+  lineHeight: 1.6,
+  boxSizing: "border-box" as const,
+  marginTop: "14px",
+} as const;
+
+const contextNoticeStyle = {
+  marginTop: "12px",
+  border: "1px solid #dbe4f0",
+  background: "#f8fbff",
+  color: "#334155",
+  borderRadius: "12px",
+  padding: "12px 14px",
+  fontSize: "13px",
+  lineHeight: "1.7",
+} as const;

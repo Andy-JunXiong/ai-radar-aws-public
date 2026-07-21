@@ -1,0 +1,21 @@
+{
+  "case_id": "case-template",
+  "schema_version": "insight_eval_case.v1",
+  "status": "seed_candidate",
+  "source_boundary": "human_seeded",
+  "input": {
+    "query_or_signal_summary": "Replace with a concise trusted signal or query summary.",
+    "source_refs": [
+      "Replace with source file, record ID, URL, or human note reference."
+    ]
+  },
+  "expected": {
+    "verification_status": "partially_verified",
+    "required_blocked_actions": [
+      "low_risk_action_candidate"
+    ],
+    "max_unsupported_or_contradicted_claims": 0,
+    "requires_model_provenance": true,
+    "notes": "Replace with the human-owned reason this case belongs in the held-out set."
+  }
+}

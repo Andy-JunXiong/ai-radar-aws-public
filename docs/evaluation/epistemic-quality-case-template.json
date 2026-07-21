@@ -1,0 +1,22 @@
+{
+  "case_id": "epistemic-quality-case-template",
+  "schema_version": "epistemic_quality_case.v1",
+  "status": "seed_candidate",
+  "source_boundary": "human_seeded",
+  "input": {
+    "title": "Replace with content title or signal title.",
+    "content_summary": "Replace with the content, signal summary, or generated insight to evaluate.",
+    "source_refs": [
+      "Replace with source URL, signal ID, file path, or human note reference."
+    ],
+    "claims_or_framing": [
+      "Replace with the main claim, framing, analogy, headline, or visual takeaway being judged."
+    ]
+  },
+  "expected": {
+    "knowledge_honesty": "unknown",
+    "transmission_adaptability": "unknown",
+    "primary_issue": "unknown",
+    "notes": "Replace with the human-owned reason this case belongs in the calibration set."
+  }
+}

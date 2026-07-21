@@ -1,0 +1,32 @@
+# Pattern Review: <pattern name>
+
+Date: <YYYY-MM-DD>
+
+Related incidents:
+
+- `<incident path>`
+
+## Pattern Hypothesis
+
+<What repeated failure mechanism may be present?>
+
+## Evidence
+
+- <incident or observation>
+
+## Counter-Evidence
+
+- <why this may not be a real pattern>
+
+## Proposed Corrective Action
+
+<What should change, if anything?>
+
+## Outcome
+
+<approved file change | proposed file change requiring separate approval |
+backlog item | no-change decision with rationale | continued observation>
+
+## Core File Approval Needed
+
+<yes/no; if yes, list the exact file and proposed change>

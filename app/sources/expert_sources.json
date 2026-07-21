@@ -1,0 +1,72 @@
+{
+  "blogs": [
+    {
+      "name": "Latent Space",
+      "url": "https://www.latent.space",
+      "category": "AI Systems",
+      "source_type": "expert",
+      "priority": 1,
+      "status": "candidate"
+    },
+    {
+      "name": "Simon Willison Blog",
+      "url": "https://simonwillison.net",
+      "category": "AI Product",
+      "source_type": "expert",
+      "priority": 1,
+      "status": "candidate"
+    },
+    {
+      "name": "Lilian Weng Blog",
+      "url": "https://lilianweng.github.io",
+      "category": "AI Research",
+      "source_type": "expert",
+      "priority": 1,
+      "status": "candidate"
+    },
+    {
+      "name": "Swyx Blog",
+      "url": "https://www.swyx.io",
+      "category": "AI Product",
+      "source_type": "expert",
+      "priority": 2,
+      "status": "candidate"
+    },
+    {
+      "name": "Chip Huyen Blog",
+      "url": "https://huyenchip.com",
+      "category": "AI Systems",
+      "source_type": "expert",
+      "priority": 2,
+      "status": "candidate"
+    }
+  ],
+  "x_accounts": [
+    {
+      "name": "Andrej Karpathy",
+      "handle": "karpathy",
+      "category": "AI Systems",
+      "source_type": "expert",
+      "priority": 1,
+      "status": "experimental"
+    },
+    {
+      "name": "Swyx",
+      "handle": "swyx",
+      "category": "AI Product",
+      "source_type": "expert",
+      "priority": 2,
+      "status": "experimental"
+    }
+  ],
+  "manual_candidates": [
+    {
+      "platform": "xiaohongshu",
+      "name": "Manual curated AI signals",
+      "category": "AI Cognition",
+      "source_type": "manual",
+      "priority": 1,
+      "status": "active"
+    }
+  ]
+}

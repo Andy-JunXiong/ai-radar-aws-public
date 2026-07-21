@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-radar.local/schemas/insight-eval-case.schema.json",
+  "title": "AI Radar Insight Evaluation Case",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "case_id",
+    "schema_version",
+    "status",
+    "source_boundary",
+    "input",
+    "expected"
+  ],
+  "properties": {
+    "case_id": {
+      "type": "string"
+    },
+    "schema_version": {
+      "type": "string",
+      "const": "insight_eval_case.v1"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["seed_candidate", "accepted_seed", "retired"]
+    },
+    "source_boundary": {
+      "type": "string",
+      "enum": ["human_seeded", "trusted_historical", "blocked_action_case"]
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["query_or_signal_summary"],
+      "properties": {
+        "query_or_signal_summary": {
+          "type": "string"
+        },
+        "source_refs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "expected": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "verification_status": {
+          "type": "string"
+        },
+        "required_blocked_actions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "max_unsupported_or_contradicted_claims": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "requires_model_provenance": {
+          "type": "boolean"
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

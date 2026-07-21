@@ -1,0 +1,11 @@
+{
+  "projects": [
+    {
+      "id": "example-project",
+      "name": "Example Project",
+      "description": "Synthetic public example",
+      "status": "active",
+      "tags": ["example"]
+    }
+  ]
+}

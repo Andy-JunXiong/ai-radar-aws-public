@@ -1,0 +1,92 @@
+---
+title: "ADR-002 - Insight as evidence-bounded verification"
+layer: insight
+status: accepted
+nature: retrospective
+date: 2026-05-06
+---
+
+## Context
+
+AI Radar originally treated Insight as the step that explains why a signal
+matters. That is still necessary, but it is no longer enough. The active product
+risk is that a fluent model summary can sound more certain than the evidence
+allows.
+
+The current development plan makes this the quality spine of the product:
+Project Takeaways, Watch, Action, Review Records, and future memory objects
+should depend on verified intelligence rather than raw model fluency.
+
+## Decision
+
+Insight is the evidence-bounded verification layer between Signal and Knowledge.
+
+This layer owns the transformation from a raw observation into a structured
+judgment object that says what is supported, what is inferred, what is weak, and
+which downstream actions are allowed or blocked.
+
+## Owns
+
+- evidence pack metadata
+- evidence sufficiency status
+- low-evidence gate reason codes
+- claim extraction
+- claim support classification
+- VerifiedInsight metadata
+- confidence and verification status
+- allowed and blocked downstream actions
+
+## Does Not Own
+
+- collecting source records; that belongs to Signal
+- long-horizon human reflection; that belongs to Reflection
+- topic movement or radar synthesis; that belongs to Knowledge Engine
+- final project review outcomes; that belongs to Project Engine
+
+## Current Implementation
+
+- `backend/app/services/evidence_pack_service.py`
+- `backend/app/services/evidence_sufficiency_service.py`
+- `backend/app/services/low_evidence_gate_service.py`
+- `backend/app/services/claim_extraction_service.py`
+- `backend/app/services/claim_verification_service.py`
+- `backend/app/services/verified_insight_service.py`
+- `backend/app/services/signal_insight_service.py`
+- `backend/app/services/execution_policy_service.py`
+- `backend/app/services/output_validation_service.py`
+- `frontend/app/signals/detail/SignalDetailClient.tsx`
+
+Signal Detail exposes verification summary, claim support, allowed / blocked
+downstream actions, downgrade reasons, and manual override affordances when the
+system gate is too conservative.
+
+## Consequences
+
+- downstream project candidates can be gated by evidence quality instead of
+  model confidence alone
+- users can see why a signal is usable, blocked, downgraded, or only safe for
+  review
+- review records and calibration events can preserve verification quality for
+  later learning
+- UI and tests must support both old flat verification metadata and newer nested
+  `verification.verified_insight` metadata
+- Project policy changes often require corresponding Insight-side verification
+  changes; this is the deliberate coupling cost of putting verification in the
+  middle
+
+## Alternatives considered
+
+### Prompt-only improvement
+
+Rejected. Prompt wording does not create durable evidence metadata, claim
+support summaries, or action gates.
+
+### Treat all model output as usable insight
+
+Rejected. That recreates the thin signal-to-action path the current plan is
+trying to close.
+
+### Full truth-verification engine
+
+Rejected. AI Radar should classify evidential support and downstream action
+eligibility; it should not claim to automatically prove external claims true.

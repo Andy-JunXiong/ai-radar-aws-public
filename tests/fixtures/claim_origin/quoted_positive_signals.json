@@ -1,0 +1,24 @@
+[
+  {
+    "signal_id": "fixture-quoted-positive",
+    "source": "github",
+    "generation_mode": "llm",
+    "provider_used": "chatgpt",
+    "model_used": "gpt-fixture",
+    "why_it_matters": "The repo added enterprise deployment docs.",
+    "evidence_pack": {
+      "summary_provenance": "source_excerpt",
+      "evidence_items": [
+        {
+          "evidence_id": "ev_fixture_source_excerpt",
+          "source_id": "fixture-quoted-positive",
+          "source_field": "source_excerpt",
+          "content": "The repo added enterprise deployment docs. Setup guidance followed.",
+          "provenance": "source_excerpt",
+          "kind": "source_excerpt",
+          "traceable": true
+        }
+      ]
+    }
+  }
+]

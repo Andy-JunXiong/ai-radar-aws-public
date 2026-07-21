@@ -1,0 +1,91 @@
+---
+title: "ADR-005 - Project Engine as review, action, and calibration"
+layer: project
+status: accepted
+nature: retrospective
+date: 2026-05-06
+---
+
+## Context
+
+AI Radar originally had Decision Card as a visible decision object. The current
+product direction changed: Project Takeaways are now the main review, watch, and
+action layer. Decision Card remains legacy MVP context, not the primary future
+object.
+
+The Project Engine must convert verified intelligence into reviewable work while
+preserving upstream evidence quality and downstream human outcomes.
+
+## Decision
+
+The Project Engine is a review-action-calibration loop: verified intelligence
+enters Review Inbox, becomes Watch or Action, produces Review Records, and feeds
+back as Calibration Events.
+
+The loop is implemented through Project Takeaways, Review Inbox, Watch, Action,
+Review Records, Trajectory, Calibration, and Workspace completion.
+
+Project actions should not be created directly from weak insight. They flow
+through verification metadata, human review, explicit watch/action metadata, and
+recorded outcomes.
+
+## Owns
+
+- Project Takeaway candidates
+- Review Inbox confirm/reject/dismiss/watch/action decisions
+- watch metadata and action metadata
+- Review Records
+- Calibration Events
+- Trajectory views
+- Workspace completion records
+- visible manual override outcomes
+
+## Does Not Own
+
+- collecting observations; that belongs to Signal
+- verifying claims; that belongs to Insight
+- long-horizon private cognition; that belongs to Reflection
+- topic movement summaries; that belongs to Knowledge Engine
+
+## Current Implementation
+
+- `backend/app/routes/projects.py`
+- `backend/app/routes/workspace.py`
+- `backend/app/services/project_intelligence_service.py`
+- `backend/app/services/project_review_record_service.py`
+- `backend/app/services/project_calibration_event_service.py`
+- `backend/app/services/project_trajectory_event_service.py`
+- `backend/app/services/verification_metadata_reader.py`
+- `frontend/app/workspace/projects/review/page.tsx`
+- `frontend/app/workspace/projects/trajectory/page.tsx`
+- `frontend/app/workspace/projects/page.tsx`
+- `frontend/app/workspace/detail/page.tsx`
+- `frontend/app/signals/detail/SignalDetailClient.tsx`
+
+## Consequences
+
+- project knowledge is built from reviewed intelligence rather than raw model
+  output
+- Watch and Action paths can carry review dates, success criteria, due dates,
+  and expected outcomes
+- Review Records and Calibration Events can compare later outcomes against
+  original evidence quality and manual override choices
+- UI must explain blocked project actions, review gates, and override outcomes
+  without hiding the system's uncertainty
+
+## Alternatives considered
+
+### Keep Decision Card as the primary object
+
+Rejected. The active plan moves the primary loop to Project Takeaways, Watch,
+Action, Review Records, and Calibration.
+
+### Create actions directly from every insight
+
+Rejected. That would let weak evidence become work and bypass the verification
+spine.
+
+### Treat review records as audit-only
+
+Rejected. Review Records and Calibration Events are the learning layer, not just
+logs.

@@ -1,0 +1,53 @@
+# Environment and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.pfx
+credentials*
+secrets*
+
+# Python / JavaScript build output
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+node_modules/
+.next/
+out/
+dist/
+build/
+*.tsbuildinfo
+
+# Logs and temporary output
+*.log
+.tmp*/
+tmp*/
+output/
+
+# Private or runtime AI Radar data
+app/context/personal_context.json
+app/context/users/
+backend/data/**
+!backend/data/README.md
+data/**
+!data/README.md
+!data/project_registry.example.json
+
+# Internal working material excluded from the public snapshot
+docs/interview-prep/
+docs/external/
+docs/cognitive-log/
+docs/coordination/
+docs/codex-assessments/
+docs/research/
+docs/archive/status/
+incidents/
+
+# Local IDE / OS files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

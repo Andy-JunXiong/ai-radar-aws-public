@@ -1,0 +1,10 @@
+repos:
+  - repo: local
+    hooks:
+      - id: skill-export-check
+        name: Check prompt-skill sync
+        entry: python scripts/run_skill_export_check.py
+        language: system
+        pass_filenames: false
+        always_run: true
+        files: ^backend/app/prompts/(registry|skill_meta)\.py$

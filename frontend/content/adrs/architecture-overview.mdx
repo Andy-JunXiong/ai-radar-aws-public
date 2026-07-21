@@ -1,0 +1,120 @@
+---
+title: "ADR-000 - The five-layer architecture"
+layer: meta
+status: accepted
+nature: retrospective
+date: 2026-05-06
+---
+
+## Context
+
+AI Radar accumulated multiple intelligence surfaces: Signals, Radar, Workspace,
+Agent Watch, Friction Signals, Project Takeaways, Reflection, Manual Upload,
+Verified Insight, Review Records, Trajectory, and Calibration.
+
+Without a load-bearing structural decision, every new surface risks pulling
+responsibility from elsewhere: a feed page starts proving claims, a reflection
+note starts being treated as evidence, or a project review starts re-deriving
+topic context.
+
+This ADR records the structural decision the other architecture ADRs assume.
+
+## Decision
+
+AI Radar is organized as four operational layers plus one cognitive context
+side-channel:
+
+```text
+Signal -> Insight -> Knowledge -> Project
+              ^
+              |
+      Reflection / Manual Intelligence
+      cognitive context only, not evidence
+```
+
+| # | Layer | Job | Failure mode it prevents |
+|---|---|---|---|
+| 01 | Signal | Durably observe heterogeneous source records | We do not know what came in |
+| 02 | Insight | Bound a claim by the available evidence | The model sounded confident |
+| 03 | Reflection | Preserve human cognition with provenance | Private notes treated as proof |
+| 04 | Knowledge | Synthesize verified intelligence over time and topic | Isolated items never become strategic intelligence |
+| 05 | Project | Convert verified intelligence into reviewed work | Weak evidence became a task |
+
+Reflection is shown as a side-channel on purpose. It enriches judgment but does
+not sit in the verification path between Signal and Project. This prevents
+private cognition from being laundered into external evidence.
+
+## Why these layers
+
+Direction matters. The operational pipeline moves from raw observation to
+reviewed action. Each layer's output becomes the next layer's input. No layer
+reaches backward to redo the previous layer's job.
+
+Each layer prevents one specific failure mode. If a failure mode in the table is
+not real, the corresponding layer is over-engineered. If a layer cannot prevent
+its own failure mode, it is mis-designed.
+
+Verification sits in the middle, not at the edges. Insight sits between raw
+Signal and downstream synthesis on purpose. The system should not let
+unverified content reach Knowledge synthesis or Project review as if it were
+settled intelligence.
+
+Reflection is not external evidence. Reflections, manual uploads, and career
+context enrich judgment, but they cannot certify external claims.
+
+## Owns
+
+- the layer decomposition itself
+- direction of flow between operational layers
+- placement of verification before synthesis
+- placement of Reflection as cognitive side-channel
+- the cross-layer rule that each layer owns one failure mode and refuses the
+  others
+
+## Does Not Own
+
+- specific service implementations within each layer
+- UI surface organization beyond mapping each surface to its owning layer
+- storage or deployment topology
+- detailed review policy inside Project Engine
+
+## Consequences
+
+- Every product surface must be clear about which layer owns its core behavior.
+- Surfaces that span layers, such as Signal Detail, must show which fields come
+  from raw Signal, Insight verification, and Project review.
+- Adding a new capability requires answering which layer owns it before
+  implementation.
+- The architecture forbids shortcuts such as generating Project actions
+  directly from Signal or treating Reflection notes as Insight evidence.
+- Downstream layers should use the verification metadata contract rather than
+  raw upstream model output.
+
+## Alternatives considered
+
+### Three layers: Ingest, Process, Act
+
+Rejected. Collapsing Insight into Process makes verification invisible at the
+architecture level, which is where the main product risk lives.
+
+### Linear five-layer pipeline with Reflection in the middle
+
+Rejected. Putting Reflection between Insight and Knowledge implies private
+cognition gates synthesis. It does not, and should not. Synthesis must remain
+grounded in external evidence.
+
+### Pipeline keyed on data type
+
+Rejected. The product's value comes from the verification stance taken at each
+step, not from the modality of the data.
+
+### Resonance retrieval as a sixth layer
+
+Rejected. Resonance retrieval is a possible technique inside Knowledge, not a
+separate structural commitment.
+
+## Follow-up
+
+This ADR is the umbrella. ADRs 001-005 each defend one layer and must stay
+consistent with the table above. If a layer's responsibilities meaningfully
+change, this ADR must be revised before the per-layer ADR, not after.

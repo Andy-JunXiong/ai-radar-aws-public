@@ -1,0 +1,77 @@
+[
+  {
+    "id": "signal",
+    "num": "01",
+    "name": "Signal",
+    "icon": "Radio",
+    "tagline": "Collect and preserve the raw observation layer.",
+    "why": "AI Radar starts before synthesis: external feeds, official updates, agent repos, friction signals, subscriptions, and manual uploads all need to become durable signal records before they can support judgment.",
+    "how": [
+      "Run scheduled collectors for RSS, official sources, GitHub, Hacker News, Product Hunt, and manual-promoted sessions",
+      "Normalize source metadata, topic, provenance, score, subscription priority, and processing tier",
+      "Persist latest and historical signal outputs with collector and pipeline metrics for operational visibility"
+    ],
+    "stack": ["EventBridge", "ECS task", "S3 JSON outputs", "FastAPI Signals"],
+    "adr_slug": "signal-ingestion"
+  },
+  {
+    "id": "insight",
+    "num": "02",
+    "name": "Insight",
+    "icon": "Brain",
+    "tagline": "Turn signals into evidence-bounded interpretation.",
+    "why": "A fluent summary is not enough. Current development centers on evidence packs, claim extraction, claim verification, VerifiedInsight metadata, and action gates so weak evidence does not become overconfident downstream work.",
+    "how": [
+      "Generate signal insight with model routing, execution policy, fallback policy, and output validation",
+      "Attach evidence sufficiency, low-evidence gates, provenance, reason codes, claim support, and verification status",
+      "Expose verified insight and blocked or allowed downstream actions in Signal Detail and Project Takeaway candidate creation"
+    ],
+    "stack": ["Model Router", "Evidence Pack", "Claim Verification", "VerifiedInsight"],
+    "adr_slug": "insight-verification"
+  },
+  {
+    "id": "reflection",
+    "num": "03",
+    "name": "Reflection",
+    "icon": "BookOpen",
+    "tagline": "Keep human cognition separate from factual evidence.",
+    "why": "Reflection is long-horizon context, not proof for external claims. AI Radar uses manual notes, saved sessions, reflection views, and career context to preserve judgment without letting private cognition masquerade as evidence.",
+    "how": [
+      "Save manual analysis sessions with upload intent, review priority, cognitive layer, and generated insight context",
+      "Link manual-upload-derived signals back to their source session and show generation and provenance context",
+      "Keep deep reflection content flexible and human-authored; derive structured judgment only when review moments are explicit"
+    ],
+    "stack": ["Manual Upload", "Reflection UI", "GitHub-backed context", "S3 session storage"],
+    "adr_slug": "reflection-cognitive-context"
+  },
+  {
+    "id": "knowledge",
+    "num": "04",
+    "name": "Knowledge Engine",
+    "icon": "Network",
+    "tagline": "Synthesize signals across topics, time, and product surfaces.",
+    "why": "The system should not collapse into a feed of isolated items. The knowledge layer turns signal and insight history into radar summaries, topic movement, Agent Watch, Friction Signals, and project-relevant intelligence.",
+    "how": [
+      "Compute topic classification, trend, momentum, rising-topic, weekly summary, and strategic-priority outputs",
+      "Build specialized intelligence surfaces such as Radar, Agent Watch, Friction Signals, and career-relevant views",
+      "Use project relevance mapping to connect structured intelligence with active work without treating similarity as final judgment"
+    ],
+    "stack": ["Trend engines", "Topic exporters", "Radar API", "S3 latest/history"],
+    "adr_slug": "knowledge-strategic-synthesis"
+  },
+  {
+    "id": "project",
+    "num": "05",
+    "name": "Project Engine",
+    "icon": "Rocket",
+    "tagline": "Convert verified intelligence into reviewable work.",
+    "why": "The current product direction moved away from Decision Cards as the main object. Project Takeaways, Watch, Action, Review Records, Trajectory, and Calibration now carry the decision loop.",
+    "how": [
+      "Route verified or manually overridden signals into Project Takeaway candidates with human review gates",
+      "Support confirm, reject, dismiss, watch, action, action completion, and workspace completion flows",
+      "Persist Review Records and Calibration Events so the system can learn from outcome quality instead of only creating tasks"
+    ],
+    "stack": ["FastAPI Projects", "Review Inbox", "Workspace", "Calibration Events"],
+    "adr_slug": "project-decision-loop"
+  }
+]

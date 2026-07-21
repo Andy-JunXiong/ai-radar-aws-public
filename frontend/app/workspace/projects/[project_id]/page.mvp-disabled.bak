@@ -1,0 +1,703 @@
+"use client";
+
+import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
+import { useParams } from "next/navigation";
+
+import AppContainer from "@/components/AppContainer";
+import PageHeader from "@/components/PageHeader";
+import RequireAdminAuth from "@/components/RequireAdminAuth";
+import { apiUrl } from "@/lib/api";
+
+type ProjectItem = {
+  project_id: string;
+  name?: string;
+  description?: string;
+  status?: string;
+  repo?: string;
+  current_state?: string;
+  roadmap?: string;
+  topics?: string[];
+};
+
+type GithubIssue = {
+  number?: number;
+  title?: string;
+  html_url?: string;
+  state?: string;
+  labels?: string[];
+};
+
+type GithubDocument = {
+  path?: string;
+  html_url?: string;
+  content?: string;
+  sha?: string;
+};
+
+type GithubContext = {
+  status?: "no_repo" | "unreachable" | "missing_roadmap" | "rate_limited" | "loaded" | string;
+  repo?: string;
+  repository?: {
+    full_name?: string;
+    description?: string;
+    default_branch?: string;
+    html_url?: string;
+    open_issues_count?: number;
+    updated_at?: string;
+  } | null;
+  readme?: GithubDocument | null;
+  roadmap?: GithubDocument | null;
+  issues?: GithubIssue[];
+  message?: string;
+};
+
+type ProjectContextResponse = {
+  project?: ProjectItem;
+  github?: GithubContext;
+  cache?: {
+    repo?: string;
+    fetched_at?: string;
+  };
+  detail?: string;
+};
+
+type ProjectImprovementItem = {
+    signal_id?: string;
+    signal_title?: string;
+    signal_summary?: string;
+    takeaway?: string;
+    why_it_matters?: string;
+    benefits?: string;
+    score?: number;
+    final_reflection?: string;
+    status?: string;
+    suggested_stage?: string;
+    saved_at?: string;
+    subscription_linked?: boolean;
+    subscription_match_score?: number;
+    subscription_matched_keywords?: string[];
+  };
+
+type ProjectImprovementsResponse = {
+  items?: ProjectImprovementItem[];
+  updated_at?: string;
+};
+
+function truncateText(value?: string, limit = 1400): string {
+  const text = (value || "").trim();
+  if (!text) return "";
+  if (text.length <= limit) return text;
+  return `${text.slice(0, limit)}\n\n...`;
+}
+
+export default function ProjectIntelligencePage() {
+  const params = useParams<{ project_id: string }>();
+  const projectId = decodeURIComponent(params.project_id);
+
+  const [project, setProject] = useState<ProjectItem | null>(null);
+  const [github, setGithub] = useState<GithubContext | null>(null);
+  const [repoInput, setRepoInput] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [savingRepo, setSavingRepo] = useState(false);
+  const [message, setMessage] = useState("");
+  const [errorMessage, setErrorMessage] = useState("");
+  const [cacheInfo, setCacheInfo] = useState<{ repo?: string; fetched_at?: string } | null>(null);
+  const [improvements, setImprovements] = useState<ProjectImprovementItem[]>([]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    async function loadProjectContext() {
+      setLoading(true);
+      setErrorMessage("");
+
+      try {
+        const response = await fetch(apiUrl(`/projects/${encodeURIComponent(projectId)}/github-context/refresh`), {
+          method: "POST",
+          cache: "no-store",
+          signal: controller.signal,
+        });
+
+        const data = (await response.json().catch(() => null)) as ProjectContextResponse | null;
+        if (!response.ok) {
+          throw new Error(data?.detail || `Failed to load project context (${response.status})`);
+        }
+
+        const improvementsResponse = await fetch(
+          apiUrl(`/projects/${encodeURIComponent(projectId)}/improvements`),
+          {
+            cache: "no-store",
+            signal: controller.signal,
+          }
+        );
+        const improvementsData = (await improvementsResponse.json().catch(() => null)) as ProjectImprovementsResponse | null;
+
+        setProject(data?.project || null);
+        setGithub(data?.github || null);
+        setCacheInfo(data?.cache || null);
+        setRepoInput(data?.project?.repo || "");
+        setImprovements(improvementsData?.items || []);
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        setProject(null);
+        setGithub(null);
+        setCacheInfo(null);
+        setImprovements([]);
+        setErrorMessage(error instanceof Error ? error.message : "Failed to load project intelligence.");
+      } finally {
+        if (!controller.signal.aborted) setLoading(false);
+      }
+    }
+
+    void loadProjectContext();
+
+    return () => {
+      controller.abort();
+    };
+  }, [projectId]);
+
+  async function handleSaveRepo() {
+    setSavingRepo(true);
+    setMessage("");
+    setErrorMessage("");
+
+    try {
+      const response = await fetch(apiUrl(`/projects/${encodeURIComponent(projectId)}/repo`), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ repo: repoInput.trim() }),
+      });
+
+      const data = (await response.json().catch(() => null)) as { detail?: string; message?: string } | null;
+      if (!response.ok) {
+        throw new Error(data?.detail || data?.message || `Failed to save repo (${response.status})`);
+      }
+
+      setMessage("GitHub repo saved. Refreshing project context...");
+      window.location.reload();
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Failed to save project repo.");
+    } finally {
+      setSavingRepo(false);
+    }
+  }
+
+  const readmeText = useMemo(() => (github?.readme?.content || "").trim(), [github]);
+  const roadmapText = useMemo(() => (github?.roadmap?.content || "").trim(), [github]);
+  const [openDocument, setOpenDocument] = useState<null | "readme" | "roadmap">(null);
+  const fullReadmeText = github?.readme?.content || "";
+  const fullRoadmapText = github?.roadmap?.content || "";
+  const githubStatus = github?.status || "no_repo";
+
+  return (
+    <AppContainer>
+      <RequireAdminAuth>
+        <PageHeader
+          title={project?.name || "Project Intelligence"}
+          description="This page reads the project you saved in Admin Project Intake. If a GitHub repo is connected, it also loads README, roadmap, and issues from GitHub."
+        />
+
+        <div style={{ marginBottom: "20px", display: "flex", gap: "14px", flexWrap: "wrap" }}>
+          <Link href="/workspace/projects" style={toolbarLinkStyle}>
+            Back to Project Takeaways
+          </Link>
+          <Link href="/admin/projects" style={toolbarPrimaryLinkStyle}>
+            Back to Project Intake
+          </Link>
+        </div>
+
+        {loading ? (
+          <div style={{ color: "#6b7280" }}>Loading project intelligence...</div>
+        ) : (
+          <div style={{ display: "grid", gap: "18px" }}>
+            <section style={panelStyle}>
+              <div style={sectionTitleStyle}>Project Connection</div>
+              <div style={{ marginTop: "8px", fontSize: "14px", lineHeight: "1.7", color: "#4b5563" }}>
+                {project?.description || "No project description available yet."}
+              </div>
+              <div style={{ marginTop: "10px", fontSize: "13px", lineHeight: "1.7", color: "#64748b" }}>
+                Save the repo here only if you want this page to read live GitHub context. If the repo is
+                already saved in Project Intake, you usually do not need to enter it again.
+              </div>
+
+              <div style={{ marginTop: "14px", display: "grid", gap: "10px", maxWidth: "720px" }}>
+                <label style={{ display: "grid", gap: "8px" }}>
+                  <span style={{ fontSize: "13px", fontWeight: 700, color: "#374151" }}>
+                    GitHub Repo
+                  </span>
+                  <input
+                    value={repoInput}
+                    onChange={(event) => setRepoInput(event.target.value)}
+                    placeholder="owner/repo or https://github.com/owner/repo"
+                    style={inputStyle}
+                  />
+                </label>
+
+              <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
+                  <button onClick={() => void handleSaveRepo()} disabled={savingRepo} style={buttonStyle}>
+                    {savingRepo ? "Saving..." : "Save Repo Connection"}
+                  </button>
+
+                  {github?.repository?.html_url ? (
+                    <a href={github.repository.html_url} target="_blank" rel="noreferrer" style={linkStyle}>
+                      Open Repository
+                    </a>
+                  ) : null}
+              </div>
+
+                <div style={buildStatusNoticeStyle(githubStatus)}>
+                  <div style={{ fontWeight: 700, marginBottom: "4px" }}>
+                    {renderGithubStatusTitle(githubStatus)}
+                  </div>
+                  <div>{github?.message || renderGithubStatusFallback(githubStatus)}</div>
+                </div>
+                {message ? <div style={successNoticeStyle}>{message}</div> : null}
+                {errorMessage ? <div style={errorNoticeStyle}>{errorMessage}</div> : null}
+              </div>
+            </section>
+
+            <section style={panelStyle}>
+              <div style={sectionTitleStyle}>Repository Snapshot</div>
+              <div style={{ marginTop: "12px", display: "flex", gap: "10px", flexWrap: "wrap" }}>
+                <span style={chipStyle}>Project ID: {project?.project_id || projectId}</span>
+                {project?.status ? <span style={chipStyle}>Status: {project.status}</span> : null}
+                <span style={chipStyle}>GitHub: {renderGithubStatusChip(githubStatus)}</span>
+                {cacheInfo?.fetched_at ? <span style={chipStyle}>Cached: {cacheInfo.fetched_at}</span> : null}
+                {github?.repository?.default_branch ? <span style={chipStyle}>Branch: {github.repository.default_branch}</span> : null}
+                {typeof github?.repository?.open_issues_count === "number" ? <span style={chipStyle}>Open issues: {github.repository.open_issues_count}</span> : null}
+              </div>
+              {project?.topics?.length ? (
+                <div style={{ marginTop: "12px", display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                  {project.topics.map((topic) => (
+                    <span key={topic} style={chipStyle}>
+                      {topic}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+            </section>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "18px", alignItems: "start" }}>
+              <section style={pairedPanelStyle}>
+                <div style={sectionTitleStyle}>Current Project Situation</div>
+                {project?.current_state?.trim() ? (
+                  <pre style={preStyle}>{truncateText(project.current_state, 1800)}</pre>
+                ) : (
+                  <div style={emptyTextStyle}>No manual project situation has been saved yet.</div>
+                )}
+              </section>
+
+              <section style={pairedPanelStyle}>
+                <div style={sectionTitleStyle}>Manual Roadmap</div>
+                {project?.roadmap?.trim() ? (
+                  <pre style={preStyle}>{truncateText(project.roadmap, 1800)}</pre>
+                ) : (
+                  <div style={emptyTextStyle}>No manual roadmap has been saved yet.</div>
+                )}
+              </section>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "18px", alignItems: "start" }}>
+              <section style={pairedPanelStyle}>
+                <div style={sectionTitleStyle}>README</div>
+                {readmeText ? (
+                  <>
+                    <div style={documentMetaStyle}>{github?.readme?.path || "README"}</div>
+                    <pre style={scrollingPreStyle}>{readmeText}</pre>
+                    <div style={documentActionsRowStyle}>
+                      <button type="button" onClick={() => setOpenDocument("readme")} style={secondaryButtonStyle}>
+                        View Full README
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <div style={emptyTextStyle}>No README content available yet.</div>
+                )}
+              </section>
+
+              <section style={pairedPanelStyle}>
+                <div style={sectionTitleStyle}>Roadmap From GitHub</div>
+                {roadmapText ? (
+                  <>
+                    <div style={documentMetaStyle}>{github?.roadmap?.path || "Roadmap"}</div>
+                    <pre style={scrollingPreStyle}>{roadmapText}</pre>
+                    <div style={documentActionsRowStyle}>
+                      <button type="button" onClick={() => setOpenDocument("roadmap")} style={secondaryButtonStyle}>
+                        View Full Roadmap
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <div style={emptyTextStyle}>
+                    We did not find a roadmap file in this repository yet. If you want GitHub roadmap content to
+                    show here, add a file like `ROADMAP.md` or `docs/roadmap.md`.
+                  </div>
+                )}
+              </section>
+            </div>
+
+            <section style={panelStyle}>
+              <div style={sectionTitleStyle}>Improvement List</div>
+              {improvements.length > 0 ? (
+                <div style={{ display: "grid", gap: "12px", marginTop: "12px" }}>
+                  {improvements.map((item, index) => (
+                    <div key={`${item.signal_id || "signal"}-${index}`} style={issueCardStyle}>
+                      <div style={{ fontSize: "15px", fontWeight: 700, color: "#111827" }}>
+                        {item.signal_title || "Untitled signal"}
+                      </div>
+                        <div style={{ marginTop: "8px", display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                          {item.status ? <span style={chipStyle}>{item.status}</span> : null}
+                          {typeof item.score === "number" ? <span style={chipStyle}>Score: {item.score}</span> : null}
+                          {item.suggested_stage ? <span style={chipStyle}>Stage: {item.suggested_stage}</span> : null}
+                          {item.subscription_linked ? <span style={chipStyle}>Subscription-linked</span> : null}
+                          {item.saved_at ? <span style={chipStyle}>{item.saved_at}</span> : null}
+                        </div>
+                        {item.subscription_matched_keywords?.length ? (
+                          <div style={{ marginTop: "8px", fontSize: "13px", color: "#6b7280", lineHeight: "1.6" }}>
+                            Matched keywords: {item.subscription_matched_keywords.join(", ")}
+                          </div>
+                        ) : null}
+                        {item.takeaway ? <div style={{ marginTop: "10px", fontSize: "14px", lineHeight: "1.7", color: "#374151" }}>{item.takeaway}</div> : null}
+                      {item.signal_id ? (
+                        <div style={{ marginTop: "12px" }}>
+                          <Link
+                            href={`/workspace/projects/${encodeURIComponent(projectId)}/improvements/${encodeURIComponent(item.signal_id)}`}
+                            style={linkStyle}
+                          >
+                            Open improvement detail
+                          </Link>
+                        </div>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ marginTop: "12px", color: "#6b7280" }}>
+                  No completed signal has been added to this project's improvement list yet.
+                </div>
+              )}
+            </section>
+
+            <section style={panelStyle}>
+              <div style={sectionTitleStyle}>Open Issues</div>
+              {(github?.issues || []).length > 0 ? (
+                <div style={{ display: "grid", gap: "12px", marginTop: "12px" }}>
+                  {(github?.issues || []).map((issue) => (
+                    <div key={`${issue.number}-${issue.title}`} style={issueCardStyle}>
+                      <div style={{ fontSize: "15px", fontWeight: 700, color: "#111827" }}>
+                        #{issue.number} {issue.title}
+                      </div>
+                      <div style={{ marginTop: "8px", display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                        {issue.state ? <span style={chipStyle}>{issue.state}</span> : null}
+                        {(issue.labels || []).map((label) => (
+                          <span key={label} style={chipStyle}>
+                            {label}
+                          </span>
+                        ))}
+                      </div>
+                      {issue.html_url ? (
+                        <div style={{ marginTop: "10px" }}>
+                          <a href={issue.html_url} target="_blank" rel="noreferrer" style={linkStyle}>
+                            Open issue
+                          </a>
+                        </div>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ marginTop: "12px", color: "#6b7280" }}>No open issues loaded for this repo yet.</div>
+              )}
+            </section>
+          </div>
+        )}
+        {openDocument ? (
+          <div style={modalOverlayStyle} onClick={() => setOpenDocument(null)}>
+            <div style={modalCardStyle} onClick={(event) => event.stopPropagation()}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "16px" }}>
+                <div>
+                  <div style={sectionTitleStyle}>
+                    {openDocument === "readme" ? "Full README" : "Full Roadmap"}
+                  </div>
+                  <div style={{ marginTop: "6px", fontSize: "13px", color: "#6b7280" }}>
+                    {openDocument === "readme"
+                      ? github?.readme?.path || "README"
+                      : github?.roadmap?.path || "Roadmap"}
+                  </div>
+                </div>
+                <button type="button" onClick={() => setOpenDocument(null)} style={secondaryButtonStyle}>
+                  Close
+                </button>
+              </div>
+
+              <pre style={{ ...preStyle, marginTop: "16px", maxHeight: "70vh" }}>
+                {openDocument === "readme" ? fullReadmeText : fullRoadmapText}
+              </pre>
+            </div>
+          </div>
+        ) : null}
+      </RequireAdminAuth>
+    </AppContainer>
+  );
+}
+
+const toolbarLinkStyle = {
+  textDecoration: "none",
+  color: "#374151",
+  fontSize: "14px",
+  fontWeight: 600,
+} as const;
+
+const toolbarPrimaryLinkStyle = {
+  textDecoration: "none",
+  color: "#111827",
+  fontSize: "14px",
+  fontWeight: 700,
+} as const;
+
+const panelStyle = {
+  border: "1px solid #e5e7eb",
+  borderRadius: "16px",
+  background: "#fff",
+  padding: "20px",
+  boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+} as const;
+
+const pairedPanelStyle = {
+  ...panelStyle,
+  minHeight: "180px",
+} as const;
+
+const sectionTitleStyle = {
+  fontSize: "22px",
+  lineHeight: "1.2",
+  fontWeight: 700,
+  color: "#111827",
+} as const;
+
+const documentActionsRowStyle = {
+  display: "flex",
+  justifyContent: "flex-end",
+  marginTop: "12px",
+} as const;
+
+const inputStyle = {
+  border: "1px solid #d1d5db",
+  borderRadius: "12px",
+  padding: "12px 14px",
+  fontSize: "14px",
+  color: "#111827",
+} as const;
+
+const buttonStyle = {
+  padding: "10px 14px",
+  borderRadius: "10px",
+  border: "1px solid #111827",
+  background: "#111827",
+  color: "#ffffff",
+  cursor: "pointer",
+  fontWeight: 700,
+} as const;
+
+const secondaryButtonStyle = {
+  padding: "10px 14px",
+  borderRadius: "10px",
+  border: "1px solid #d1d5db",
+  background: "#ffffff",
+  color: "#111827",
+  cursor: "pointer",
+  fontWeight: 600,
+} as const;
+
+const linkStyle = {
+  textDecoration: "none",
+  color: "#111827",
+  fontSize: "14px",
+  fontWeight: 700,
+} as const;
+
+const chipStyle = {
+  display: "inline-flex",
+  alignItems: "center",
+  padding: "5px 10px",
+  borderRadius: "999px",
+  border: "1px solid #d1d5db",
+  background: "#ffffff",
+  fontSize: "12px",
+  color: "#374151",
+  fontWeight: 600,
+} as const;
+
+const preStyle = {
+  marginTop: "10px",
+  padding: "16px",
+  borderRadius: "12px",
+  background: "#f8fafc",
+  border: "1px solid #eef2f7",
+  whiteSpace: "pre-wrap" as const,
+  fontSize: "13px",
+  lineHeight: "1.7",
+  color: "#334155",
+  overflowX: "auto" as const,
+} as const;
+
+const scrollingPreStyle = {
+  ...preStyle,
+  height: "520px",
+  overflowY: "auto" as const,
+} as const;
+
+const documentMetaStyle = {
+  marginTop: "10px",
+  fontSize: "12px",
+  color: "#6b7280",
+  textTransform: "uppercase" as const,
+  letterSpacing: "0.4px",
+} as const;
+
+const emptyTextStyle = {
+  marginTop: "12px",
+  color: "#6b7280",
+  fontSize: "14px",
+  lineHeight: "1.7",
+} as const;
+
+const issueCardStyle = {
+  border: "1px solid #e5e7eb",
+  borderRadius: "14px",
+  padding: "16px",
+  background: "#fafafa",
+} as const;
+
+const modalOverlayStyle = {
+  position: "fixed",
+  inset: 0,
+  background: "rgba(15, 23, 42, 0.5)",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: "24px",
+  zIndex: 120,
+} as const;
+
+const modalCardStyle = {
+  width: "min(1100px, 100%)",
+  maxHeight: "85vh",
+  overflow: "auto",
+  borderRadius: "20px",
+  background: "#ffffff",
+  border: "1px solid #e5e7eb",
+  boxShadow: "0 24px 48px rgba(15, 23, 42, 0.18)",
+  padding: "22px",
+} as const;
+
+const successNoticeStyle = {
+  border: "1px solid #bbf7d0",
+  background: "#ecfdf3",
+  color: "#166534",
+  borderRadius: "12px",
+  padding: "12px 14px",
+  fontSize: "13px",
+} as const;
+
+const errorNoticeStyle = {
+  border: "1px solid #fecaca",
+  background: "#fff1f2",
+  color: "#be123c",
+  borderRadius: "12px",
+  padding: "12px 14px",
+  fontSize: "13px",
+} as const;
+
+function renderGithubStatusTitle(status: string) {
+  switch (status) {
+    case "loaded":
+      return "GitHub Connected"
+    case "rate_limited":
+      return "GitHub Rate Limited"
+    case "missing_roadmap":
+      return "GitHub Connected, Roadmap Missing"
+    case "unreachable":
+      return "GitHub Not Reachable Right Now"
+    case "no_repo":
+    default:
+      return "No GitHub Repo Connected"
+  }
+}
+
+function renderGithubStatusFallback(status: string) {
+  switch (status) {
+    case "loaded":
+      return "Repository metadata is available and GitHub content has loaded."
+    case "rate_limited":
+      return "GitHub API requests are being rate limited. Add GITHUB_TOKEN in .env to increase the limit."
+    case "missing_roadmap":
+      return "The repository is reachable, but no roadmap file was found yet."
+    case "unreachable":
+      return "The repo is saved, but GitHub could not be reached from the backend right now."
+    case "no_repo":
+    default:
+      return "Save a GitHub repo connection if you want this page to load GitHub context."
+  }
+}
+
+function renderGithubStatusChip(status: string) {
+  switch (status) {
+    case "loaded":
+      return "loaded"
+    case "rate_limited":
+      return "rate limited"
+    case "missing_roadmap":
+      return "missing roadmap"
+    case "unreachable":
+      return "not reachable"
+    case "no_repo":
+    default:
+      return "not connected"
+  }
+}
+
+function buildStatusNoticeStyle(status: string) {
+  if (status === "loaded") {
+    return {
+      border: "1px solid #bbf7d0",
+      background: "#ecfdf3",
+      color: "#166534",
+      borderRadius: "12px",
+      padding: "12px 14px",
+      fontSize: "13px",
+    } as const;
+  }
+
+  if (status === "rate_limited") {
+    return {
+      border: "1px solid #fecaca",
+      background: "#fff1f2",
+      color: "#be123c",
+      borderRadius: "12px",
+      padding: "12px 14px",
+      fontSize: "13px",
+    } as const;
+  }
+
+  if (status === "missing_roadmap") {
+    return {
+      border: "1px solid #fde68a",
+      background: "#fffbeb",
+      color: "#92400e",
+      borderRadius: "12px",
+      padding: "12px 14px",
+      fontSize: "13px",
+    } as const;
+  }
+
+  return {
+    border: "1px solid #dbe4f0",
+    background: "#f8fbff",
+    color: "#334155",
+    borderRadius: "12px",
+    padding: "12px 14px",
+    fontSize: "13px",
+  } as const;
+}

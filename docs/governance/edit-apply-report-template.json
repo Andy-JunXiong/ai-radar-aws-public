@@ -1,0 +1,20 @@
+{
+  "schema_version": "edit_apply_report.v1",
+  "generated_at": "YYYY-MM-DDTHH:MM:SSZ",
+  "actor": "codex",
+  "scope": "short description of the change set",
+  "decision_boundary": "agent_edit_governance_only",
+  "edits": [
+    {
+      "edit_id": "edit-001",
+      "target_path": "docs/example.md",
+      "target_anchor": "section heading or stable marker",
+      "operation": "replace",
+      "decision": "accepted",
+      "rationale": "Why this bounded edit is needed.",
+      "expected_behavior_change": "What should change after the edit.",
+      "validation": ["command or review performed"],
+      "risk_notes": "Known limitation or reviewer attention point."
+    }
+  ]
+}

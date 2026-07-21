@@ -1,0 +1,59 @@
+[
+  {
+    "layer": "signal",
+    "title": "Signal collected",
+    "detail": "The scheduled ingestion task normalizes an official AI ecosystem update into a durable signal record with source, topic, subscription priority, and collector telemetry.",
+    "snapshot": {
+      "source": "official_collector",
+      "title": "OpenAI updates agent tooling documentation",
+      "topic": "ai_agents",
+      "subscription_priority": "boosted",
+      "processing_tier": "auto_insight",
+      "collector_run": "recorded"
+    }
+  },
+  {
+    "layer": "insight",
+    "title": "Insight verified",
+    "detail": "The insight layer builds an evidence pack, extracts claims, classifies support, and decides which downstream actions are allowed or blocked.",
+    "snapshot": {
+      "verified_insight_id": "vi_2026_05_06_agent_docs",
+      "verification_status": "partially_verified",
+      "claim_support": {
+        "directly_supported": 2,
+        "inferred": 1,
+        "unsupported": 0
+      },
+      "allowed_downstream_actions": ["project_takeaway_candidate", "watch"],
+      "blocked_downstream_actions": ["action_without_review"]
+    }
+  },
+  {
+    "layer": "knowledge",
+    "title": "Strategic synthesis updated",
+    "detail": "Knowledge synthesis updates Radar, Agent Watch, and project relevance while keeping reflection as context, not evidence.",
+    "snapshot": {
+      "topic": "ai_agents",
+      "radar_surface": "updated",
+      "agent_watch": "candidate_profile_refresh",
+      "project_relevance": ["ai-radar-aws", "career-positioning"],
+      "reflection_context": {
+        "manual_session_id": "manual_2026_05_06_agent_tooling",
+        "cognitive_layer": "L2",
+        "evidence_role": "context_only"
+      }
+    }
+  },
+  {
+    "layer": "project",
+    "title": "Review path created",
+    "detail": "The Project Engine creates a reviewable Project Takeaway candidate instead of an automatic action, preserving verification metadata for Review Records and Calibration Events.",
+    "snapshot": {
+      "candidate_status": "candidate",
+      "review_gate": "human_required",
+      "available_outcomes": ["confirm", "watch", "action", "reject", "dismiss"],
+      "calibration_event": "pending_review_outcome",
+      "workspace_completion": "not_started"
+    }
+  }
+]

@@ -1,0 +1,88 @@
+---
+title: "ADR-003 - Reflection and manual intelligence as cognitive context"
+layer: reflection
+status: accepted
+nature: retrospective
+date: 2026-05-06
+---
+
+## Context
+
+AI Radar contains human-written reflections, manual uploads, saved manual
+analysis sessions, and career-relevant context. These artifacts preserve
+judgment, intent, and learning history, but they are not the same kind of
+material as external source evidence.
+
+The product direction is explicit: Reflection is cognition context, not factual
+evidence for external claims.
+
+## Decision
+
+Reflection preserves human cognition and manual intelligence while keeping
+provenance visible.
+
+Both hand-written GitHub markdown reflections and manual upload sessions live in
+this layer. Manual uploads can produce signal-like records when the user wants
+to analyze source material, but they must remain visibly manual. Deep
+reflections remain flexible and human-authored. The system derives structured
+review objects only when the user performs explicit review, action, completion,
+or promotion steps.
+
+## Owns
+
+- hand-written GitHub markdown reflections
+- manual upload sessions
+- upload intent, intended use, review priority, and cognitive layer metadata
+- links from manual-derived signals back to source sessions
+- reflection and career context views
+- human-authored judgment context
+
+## Does Not Own
+
+- proving external claims; that belongs to Insight verification
+- treating private cognition as public evidence
+- automatic task creation; that belongs to Project Engine after review
+- rigid deep-reflection schemas before real usage proves them
+
+## Current Implementation
+
+- `frontend/app/manual/page.tsx`
+- `frontend/app/manual/detail/ManualSessionDetailClient.tsx`
+- `frontend/app/workspace/reflection/page.tsx`
+- `frontend/app/workspace/career/page.tsx`
+- `backend/app/routes/manual.py`
+- `backend/app/routes/reflection.py`
+- `backend/app/routes/signals.py`
+- `backend/app/services/manual_storage.py`
+- `backend/app/services/reflection_service.py`
+- `app/intelligence/manual_signal_promotion.py`
+
+Manual sessions can store upload reason, intended use, review priority,
+cognitive layer, files, generated analysis, fallback status, model metadata, and
+links back into Signal Detail.
+
+## Consequences
+
+- manual research can enter Signal Detail and Project Takeaway review without
+  hiding its source type
+- reflection can enrich judgment without being misused as external proof
+- manual-derived signals require explicit UI context so users do not confuse
+  them with collected external signals
+- reflection matching must stay conservative until stable usage patterns emerge
+
+## Alternatives considered
+
+### Treat manual uploads only as reflections
+
+Rejected. Some manual uploads are source material that should be analyzed and
+reviewed through Signal Detail.
+
+### Treat reflections as evidence
+
+Rejected. Reflection can explain relevance to the user, but it does not verify
+external claims.
+
+### Force a rigid deep-reflection schema now
+
+Rejected. The current bridge is lightweight cognitive-layer marking, not a full
+schema rewrite.

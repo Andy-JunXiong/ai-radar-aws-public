@@ -1,0 +1,41 @@
+.git
+.venv
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.next
+node_modules
+frontend/.next
+frontend/node_modules
+.env
+.env.*
+!.env.example
+
+# Source-adjacent local/generated data. Runtime should create or fetch these,
+# not bake local snapshots into the ingestion image.
+data/output
+data/tmp
+output
+backend/data/auth
+backend/data/output
+backend/data/manual_uploads
+backend/data/workspace_visuals
+
+# Docs/tests/dev-only assets are not required by the root ingestion Dockerfile.
+docs
+tests
+skill3_partial_baseline_staging
+ui
+
+# Local test/runtime scratch directories.
+.tmp-tests
+tmp_metrics_refresh_tests
+tmp_metrics_tests
+tmp_pipeline_metrics_tests
+tmp_pytest_metrics
+
+# Local logs and generated caches are not needed in Docker build context.
+*.log
+*.tmp
+__pycache__
+**/__pycache__

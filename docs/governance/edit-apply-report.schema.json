@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-radar.local/schemas/edit-apply-report.schema.json",
+  "title": "AI Radar Edit Apply Report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "generated_at",
+    "actor",
+    "scope",
+    "decision_boundary",
+    "edits"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "edit_apply_report.v1"
+    },
+    "generated_at": {
+      "type": "string"
+    },
+    "actor": {
+      "type": "string"
+    },
+    "scope": {
+      "type": "string"
+    },
+    "decision_boundary": {
+      "type": "string",
+      "const": "agent_edit_governance_only"
+    },
+    "edits": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "edit_id",
+          "target_path",
+          "operation",
+          "decision",
+          "rationale"
+        ],
+        "properties": {
+          "edit_id": {
+            "type": "string"
+          },
+          "target_path": {
+            "type": "string"
+          },
+          "target_anchor": {
+            "type": "string"
+          },
+          "operation": {
+            "type": "string",
+            "enum": ["add", "delete", "replace", "skip"]
+          },
+          "decision": {
+            "type": "string",
+            "enum": ["accepted", "skipped"]
+          },
+          "rationale": {
+            "type": "string"
+          },
+          "expected_behavior_change": {
+            "type": "string"
+          },
+          "validation": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "risk_notes": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

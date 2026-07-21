@@ -1,0 +1,40 @@
+# Attributed Incident: <short title>
+
+Date: <YYYY-MM-DD>
+
+Raw record: `<path>`
+
+Status: reviewable attribution
+
+## Summary
+
+<One-paragraph description of the collaboration failure and recovery.>
+
+## Facts
+
+- <verified fact>
+
+## Attribution
+
+### Stage <n>: `<stage_name>`
+
+Contribution: <who or what contributed, with confidence and caveats>
+
+Evidence:
+
+- <evidence>
+
+## What Worked
+
+- <recovery behavior that should be preserved>
+
+## Candidate Pattern
+
+`<pattern-name-or-none>`
+
+Rationale: <why this may recur, or why it should not become a pattern yet>
+
+## Outcome
+
+<approved file change | proposed file change requiring separate approval |
+backlog item | no-change decision with rationale | continued observation>

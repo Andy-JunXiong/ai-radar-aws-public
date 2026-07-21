@@ -1,0 +1,88 @@
+---
+title: "ADR-004 - Knowledge Engine as strategic synthesis"
+layer: knowledge
+status: accepted
+nature: retrospective
+date: 2026-05-06
+---
+
+## Context
+
+AI Radar should not become a feed of isolated signal cards. After Signal and
+Insight produce structured records, the product needs a synthesis layer that
+shows movement across topics, time, surfaces, and project relevance.
+
+Earlier architecture language used "resonance retrieval" and implied vector
+search infrastructure. That is not the current implementation center. The live
+system is stronger in topic classification, trend and momentum analysis, Radar,
+Agent Watch, Friction Signals, and project relevance synthesis.
+
+## Decision
+
+The Knowledge Engine is the strategic synthesis layer across signals, insights,
+topics, time, and product surfaces.
+
+Its identity is not trend engine or topic classifier; those are outputs. Its
+identity is verification-aware synthesis: it should prefer and surface
+verification metadata where available, and Project-bound synthesis must respect
+Insight gates. Retrieval or vector memory can be added later, but it is not the
+current source of truth for this layer.
+
+## Owns
+
+- topic classification and topic movement
+- daily radar and strategic-priority outputs
+- trend, momentum, rising-topic, and weekly summary outputs
+- Agent Watch and Friction Signals synthesis
+- project relevance mapping before Project Takeaway review
+
+## Does Not Own
+
+- raw source collection; that belongs to Signal
+- claim-level evidence classification; that belongs to Insight
+- private reflection authorship; that belongs to Reflection
+- final watch/action/review outcomes; that belongs to Project Engine
+
+## Current Implementation
+
+- `app/intelligence/topic_classifier.py`
+- `app/intelligence/topic_momentum_engine.py`
+- `app/intelligence/topic_trend_engine.py`
+- `app/intelligence/rising_topics_engine.py`
+- `app/intelligence/strategic_priority_engine.py`
+- `app/intelligence/weekly_topic_summary.py`
+- `app/exporters/topic_intelligence_exporter.py`
+- `app/exporters/topic_momentum_exporter.py`
+- `app/exporters/topic_graph_exporter.py`
+- `backend/app/routes/radar.py`
+- `backend/app/routes/trends.py`
+- `frontend/app/radar/page.tsx`
+- `frontend/app/agent-watch/detail/page.tsx`
+- `frontend/app/friction-signals/detail/page.tsx`
+
+## Consequences
+
+- Radar and trend surfaces can explain movement instead of showing only item
+  lists
+- Agent Watch and Friction Signals can remain specialized high-density
+  intelligence surfaces
+- Project Takeaway review receives context shaped by topic, priority, and
+  evidence quality
+- architecture copy must not overclaim vector retrieval or memory features that
+  are not currently central in code
+
+## Alternatives considered
+
+### Keep the previous retrieval-oriented layer name
+
+Rejected. It describes an aspirational retrieval pattern, not the implemented
+product layer.
+
+### Make vector similarity the primary knowledge layer
+
+Rejected for now. Current value comes from topic movement, specialized surfaces,
+verification-aware synthesis, and project relevance.
+
+### Collapse Knowledge into Signal or Project
+
+Rejected. Without synthesis, AI Radar becomes either a feed or a task queue.

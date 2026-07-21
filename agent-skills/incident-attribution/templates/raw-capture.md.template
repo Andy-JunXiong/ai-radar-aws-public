@@ -1,0 +1,30 @@
+# Raw Incident: <short title>
+
+Date: <YYYY-MM-DD>
+
+Active task: <what the team was trying to do>
+
+## What Happened
+
+<Factual description only. Do not assign blame here.>
+
+## Where It Appeared
+
+- <file, ADR, command, UI surface, or handoff artifact>
+
+## Immediate Impact
+
+<What changed, failed, became blocked, or needed rework?>
+
+## Immediate Fix / Current Status
+
+<What was done so far, or what remains open?>
+
+## Evidence
+
+- <repo file, test output, browser observation, user report, or other evidence>
+
+## Sensitive Data Check
+
+This record excludes credentials, secrets, raw sensitive prompts, private user
+data, full external API payloads, and unnecessary runtime data.
