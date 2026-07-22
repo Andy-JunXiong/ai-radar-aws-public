@@ -698,6 +698,8 @@ export function buildStateAwareGuidanceResponse(
           "This is the AI Radar operating home, not an individual Signal page.",
           "It summarizes the main loop: Intake collects information, Signal Review handles evidence and status, Project Review handles human judgment, and Trajectory shows learning history.",
           "Review Focus and Work Surfaces are navigation entry points that help you choose where to work next.",
+          "View evidence portfolio opens the public, no-login evidence trail for the product, governance cases, and implementation boundaries.",
+          "View evidence portfolio opens the public, no-login evidence trail for the product, governance cases, and implementation boundaries.",
         ]
       ,
         [
@@ -714,12 +716,14 @@ export function buildStateAwareGuidanceResponse(
         "This is the AI Radar operating home. The next step depends on the work you want to do today.",
         `${suggestedButton(language, "Signals")} Use Signals if you want to review newly collected information.`,
         "Use Project Takeaways or Workspace if you want to handle project-level judgment or reusable memory.",
+        "Use View evidence portfolio when you want the public, no-login evidence trail for the product and governance rather than an operating workflow.",
       ]
     ,
       [
         "This is the AI Radar operating home. The next step depends on the work you want to do today.",
         `${suggestedButton(language, "Signals")} Use Signals if you want to review newly collected information.`,
         "Use Project Takeaways or Workspace if you want to handle project-level judgment or reusable memory.",
+        "Use View evidence portfolio when you want the public, no-login evidence trail for the product and governance rather than an operating workflow.",
       ]
     );
   }

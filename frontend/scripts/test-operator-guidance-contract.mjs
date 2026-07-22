@@ -394,6 +394,15 @@ const cases = [
     mustNotInclude: ["Signal workflow overview", "Completion Note"],
   },
   {
+    name: "operating home explains the public portfolio entry",
+    pathname: "/",
+    pageText: `${operatingHomeText} View evidence portfolio`,
+    question: "What does View evidence portfolio open?",
+    language: "en",
+    mustInclude: ["public, no-login evidence trail", "product and governance"],
+    mustNotInclude: ["Signal workflow overview", "Completion Note"],
+  },
+  {
     name: "manual upload meaning stays upload-scoped",
     pathname: "/manual",
     pageText: manualUploadText,

@@ -183,6 +183,10 @@ export default function LandingPage() {
               <Radar size={17} aria-hidden="true" />
               Review signals
             </Link>
+            <Link href="/portfolio" style={secondaryButtonStyle}>
+              <FileSearch size={17} aria-hidden="true" />
+              View evidence portfolio
+            </Link>
           </div>
         </div>
 
