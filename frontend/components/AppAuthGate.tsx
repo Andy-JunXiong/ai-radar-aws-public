@@ -9,6 +9,7 @@ import {
   getStoredAdminToken,
   verifyAdminSession,
 } from "@/lib/adminAuth";
+import { isPublicRoute } from "@/lib/publicRoutes";
 
 export default function AppAuthGate({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -17,7 +18,7 @@ export default function AppAuthGate({ children }: { children: React.ReactNode })
   const [allowed, setAllowed] = useState(false);
 
   const isLoginPage = pathname === "/login" || pathname === "/login/";
-  const isPublicPage = pathname === "/";
+  const isPublicPage = isPublicRoute(pathname || "/");
 
   useEffect(() => {
     let active = true;

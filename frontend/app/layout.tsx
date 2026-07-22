@@ -1,7 +1,6 @@
 import "./globals.css";
 import AppAuthGate from "@/components/AppAuthGate";
-import OperatorGuidanceWidget from "@/components/OperatorGuidanceWidget";
-import TopNav from "@/components/TopNav";
+import AppChrome from "@/components/AppChrome";
 
 export default function RootLayout({
   children,
@@ -26,7 +25,7 @@ export default function RootLayout({
           color: "var(--app-fg)",
         }}
       >
-        <TopNav />
+        <AppChrome />
 
         <main
           style={{
@@ -35,7 +34,6 @@ export default function RootLayout({
         >
           <AppAuthGate>{children}</AppAuthGate>
         </main>
-        <OperatorGuidanceWidget />
       </body>
     </html>
   );

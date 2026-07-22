@@ -1030,7 +1030,16 @@ for (const testCase of cases) {
 }
 
 const discoveredRoutes = collectPageRoutes(join(process.cwd(), "app"));
-for (const route of discoveredRoutes) {
+const routesWithoutOperatorGuidance = new Set(["/portfolio"]);
+const appChromeSource = readFileSync(join(process.cwd(), "components/AppChrome.tsx"), "utf8");
+assert.ok(
+  appChromeSource.includes("if (isPortfolio)") &&
+    appChromeSource.indexOf("if (isPortfolio)") < appChromeSource.indexOf("<OperatorGuidanceWidget />"),
+  "portfolio must exit to public chrome before Operator Guidance is mounted"
+);
+
+const guidanceRoutes = discoveredRoutes.filter((route) => !routesWithoutOperatorGuidance.has(route));
+for (const route of guidanceRoutes) {
   const sampleText = `AI Radar route ${route} page title main button status`;
 
   runCase({
@@ -1124,4 +1133,4 @@ assert.ok(
   `manual source answer should point to manual intake flow\n\nActual:\n${manualSourceAnswer}`
 );
 
-console.log(`Guidance contract tests passed: ${cases.length + discoveredRoutes.length * 2} (${discoveredRoutes.length} discovered routes)`);
+console.log(`Guidance contract tests passed: ${cases.length + guidanceRoutes.length * 2} (${guidanceRoutes.length} guidance-enabled routes; ${routesWithoutOperatorGuidance.size} public route excluded by contract)`);

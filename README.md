@@ -2,7 +2,7 @@
 
 **An evidence-bounded AI intelligence system that turns fast-moving AI ecosystem signals into project-level judgment — without allowing weak evidence to become automatic action.**
 
-[Live product](https://app.ai-radar-lab.com) · [Backend API](https://api.ai-radar-lab.com) · [Case study](docs/portfolio/CASE_STUDY.md) · [Architecture](docs/portfolio/ARCHITECTURE.md) · [Roadmap](ROADMAP.md)
+[Live product](https://app.ai-radar-lab.com) · [Evidence portfolio](https://app.ai-radar-lab.com/portfolio) · [Backend API](https://api.ai-radar-lab.com) · [Case study](docs/portfolio/CASE_STUDY.md) · [Architecture](docs/portfolio/ARCHITECTURE.md) · [Roadmap](ROADMAP.md)
 
 ![Python](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688?logo=fastapi&logoColor=white)
