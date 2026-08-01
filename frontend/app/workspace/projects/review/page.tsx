@@ -365,6 +365,63 @@ type RecordQualityFilter =
   | "inferred_claims";
 type RecordSortOrder = "newest" | "oldest";
 
+type ProjectWatchObservation = {
+  observation_id?: string;
+  summary?: string;
+  source_signal_id?: string;
+  evidence_role?: "review_context_only";
+  observed_at?: string;
+};
+
+type ProjectWatchMatchReason = {
+  code?: string;
+  label?: string;
+  matched_terms?: string[];
+};
+
+type ProjectWatchRelatedSignalCandidate = {
+  match_id?: string;
+  signal_id?: string;
+  signal_title?: string;
+  signal_summary?: string;
+  candidate_role?: "review_candidate_only";
+  status?: "unseen" | "accepted" | "ignore" | "not_related";
+  match_reasons?: ProjectWatchMatchReason[];
+  created_at?: string;
+};
+
+type ProjectWatchItem = {
+  watch_id?: string;
+  project_id?: string;
+  project_name?: string;
+  watch_kind?: "evidence_followup";
+  origin_signal_id?: string;
+  origin_signal_title?: string;
+  watch_question?: string;
+  watch_reason?: string;
+  success_criteria?: string;
+  exit_criteria?: string;
+  next_review_at?: string;
+  state?: "active" | "resolved";
+  created_at?: string;
+  observation_count?: number;
+  observations?: ProjectWatchObservation[];
+  related_signal_candidates?: ProjectWatchRelatedSignalCandidate[];
+  new_match_count?: number;
+  has_new_matches?: boolean;
+  is_due?: boolean;
+  is_overdue?: boolean;
+  needs_plan?: boolean;
+  resolution_basis?: string;
+  resolution_note?: string;
+};
+
+type ProjectWatchItemsResponse = {
+  items?: ProjectWatchItem[];
+  summary?: { total?: number; due?: number; needs_plan?: number; new_matches?: number };
+  detail?: string;
+};
+
 type CandidatesResponse = {
   items?: ProjectTakeawayCandidate[];
   detail?: string;
@@ -2793,12 +2850,26 @@ export default function ProjectTakeawayReviewPage() {
   const focusedSignalId = (searchParams.get("signal_id") || "").trim();
   const initialViewParam = (searchParams.get("view") || "").trim();
   const [items, setItems] = useState<ProjectTakeawayCandidate[]>([]);
+  const [projectWatchItems, setProjectWatchItems] = useState<ProjectWatchItem[]>([]);
+  const [projectWatchLoading, setProjectWatchLoading] = useState(true);
+  const [projectWatchError, setProjectWatchError] = useState("");
+  const [projectWatchMutationKey, setProjectWatchMutationKey] = useState("");
+  const [projectWatchMessageById, setProjectWatchMessageById] = useState<Record<string, string>>({});
+  const [projectWatchObservationById, setProjectWatchObservationById] = useState<Record<string, string>>({});
+  const [projectWatchNextReviewById, setProjectWatchNextReviewById] = useState<Record<string, string>>({});
+  const [projectWatchResolutionBasisById, setProjectWatchResolutionBasisById] = useState<Record<string, string>>({});
+  const [projectWatchResolutionNoteById, setProjectWatchResolutionNoteById] = useState<Record<string, string>>({});
+  const [projectWatchMatchNoteById, setProjectWatchMatchNoteById] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [recordsLoading, setRecordsLoading] = useState(false);
   const [telemetryLoading, setTelemetryLoading] = useState(false);
   const [recordsLoaded, setRecordsLoaded] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
-  const [activeView, setActiveView] = useState<ReviewView>(initialViewParam === "records" ? "records" : "pending");
+  const [activeView, setActiveView] = useState<ReviewView>(
+    ["pending", "closed", "watch", "action", "records"].includes(initialViewParam)
+      ? initialViewParam as ReviewView
+      : "pending"
+  );
   const [reviewDisplayMode, setReviewDisplayMode] = useState<ReviewDisplayMode>("original");
   const [records, setRecords] = useState<ProjectReviewRecord[]>([]);
   const [recordSummary, setRecordSummary] = useState<ProjectReviewSummary | null>(null);
@@ -2862,6 +2933,27 @@ export default function ProjectTakeawayReviewPage() {
     } finally {
       setLoading(false);
       setLoadStatus("");
+    }
+  }, []);
+
+  const loadProjectWatchItems = useCallback(async () => {
+    setProjectWatchLoading(true);
+    setProjectWatchError("");
+    try {
+      const response = await adminFetchWithTimeout(apiUrl("/projects/watch-items?state=active"), { cache: "no-store" });
+      const data = (await response.json().catch(() => null)) as ProjectWatchItemsResponse | null;
+      if (!response.ok) {
+        throw new Error(data?.detail || `Failed to load Project Watch items (${response.status})`);
+      }
+      setProjectWatchItems(data?.items || []);
+    } catch (error) {
+      setProjectWatchError(
+        isAbortError(error)
+          ? "Project Watch request timed out. Confirm the backend is running, then refresh."
+          : error instanceof Error ? error.message : "Failed to load Project Watch items."
+      );
+    } finally {
+      setProjectWatchLoading(false);
     }
   }, []);
 
@@ -2947,6 +3039,9 @@ export default function ProjectTakeawayReviewPage() {
   const closedItems = items.filter((item) => (item.status || "").toLowerCase() !== "candidate");
   const watchItems = items.filter((item) => (item.status || "").toLowerCase() === "watch");
   const actionItems = items.filter((item) => (item.status || "").toLowerCase() === "action");
+  const projectWatchDueCount = projectWatchItems.filter((item) => item.is_due).length;
+  const projectWatchNewMatchCount = projectWatchItems.reduce((total, item) => total + (item.new_match_count || 0), 0);
+  const totalWatchCount = watchItems.length + projectWatchItems.length;
   const candidateSourceItems =
     activeView === "pending"
       ? pendingItems
@@ -2971,7 +3066,7 @@ export default function ProjectTakeawayReviewPage() {
   }).length;
   const workbenchDecisionLine = buildWorkbenchDecisionLine({
     pendingCount: pendingItems.length,
-    watchCount: watchItems.length,
+    watchCount: totalWatchCount,
     actionCount: actionItems.length,
     actionBlockedCount: pendingActionBlockedCount,
     manualCount: manualSourceCandidateCount,
@@ -3229,8 +3324,9 @@ export default function ProjectTakeawayReviewPage() {
 
   useEffect(() => {
     void loadCandidates();
+    void loadProjectWatchItems();
     void loadReviewTelemetry();
-  }, [loadCandidates, loadReviewTelemetry]);
+  }, [loadCandidates, loadProjectWatchItems, loadReviewTelemetry]);
 
   useEffect(() => {
     if (activeView === "records" && !recordsLoaded) {
@@ -3688,6 +3784,125 @@ export default function ProjectTakeawayReviewPage() {
     }
   }
 
+  async function handleAddProjectWatchObservation(item: ProjectWatchItem) {
+    const watchId = item.watch_id || "";
+    const projectId = item.project_id || "";
+    const summary = (projectWatchObservationById[watchId] || "").trim();
+    if (!watchId || !projectId || !summary) {
+      setProjectWatchError("Observation summary is required.");
+      return;
+    }
+    setProjectWatchMutationKey(`${watchId}:observation`);
+    setProjectWatchError("");
+    try {
+      const response = await adminFetch(
+        apiUrl(`/projects/${encodeURIComponent(projectId)}/watch-items/${encodeURIComponent(watchId)}/observations`),
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            summary,
+            next_review_at: projectWatchNextReviewById[watchId] || "",
+          }),
+        }
+      );
+      const data = (await response.json().catch(() => null)) as { item?: ProjectWatchItem; detail?: string } | null;
+      if (!response.ok) {
+        throw new Error(data?.detail || `Failed to add Watch observation (${response.status})`);
+      }
+      setProjectWatchItems((current) => current.map((row) => row.watch_id === watchId ? { ...row, ...(data?.item || {}) } : row));
+      setProjectWatchObservationById((current) => ({ ...current, [watchId]: "" }));
+      setProjectWatchNextReviewById((current) => ({ ...current, [watchId]: "" }));
+      setProjectWatchMessageById((current) => ({
+        ...current,
+        [watchId]: "Observation recorded as review context only. Verification and action eligibility did not change.",
+      }));
+    } catch (error) {
+      setProjectWatchError(error instanceof Error ? error.message : "Failed to add Watch observation.");
+    } finally {
+      setProjectWatchMutationKey("");
+    }
+  }
+
+  async function handleReviewProjectWatchMatch(
+    item: ProjectWatchItem,
+    candidate: ProjectWatchRelatedSignalCandidate,
+    decision: "accept" | "ignore" | "not_related"
+  ) {
+    const watchId = item.watch_id || "";
+    const projectId = item.project_id || "";
+    const signalId = candidate.signal_id || "";
+    const noteKey = `${watchId}:${signalId}`;
+    const reviewNote = (projectWatchMatchNoteById[noteKey] || "").trim();
+    if (!watchId || !projectId || !signalId) return;
+    if (decision === "accept" && !reviewNote) {
+      setProjectWatchError("Accepting a related Signal requires a reviewer note explaining the relationship.");
+      return;
+    }
+    setProjectWatchMutationKey(`${noteKey}:match`);
+    setProjectWatchError("");
+    try {
+      const response = await adminFetch(
+        apiUrl(`/projects/${encodeURIComponent(projectId)}/watch-items/${encodeURIComponent(watchId)}/matches/${encodeURIComponent(signalId)}/decision`),
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ decision, review_note: reviewNote }),
+        }
+      );
+      const data = (await response.json().catch(() => null)) as { item?: ProjectWatchItem; detail?: string } | null;
+      if (!response.ok) {
+        throw new Error(data?.detail || `Failed to review related Signal (${response.status})`);
+      }
+      setProjectWatchItems((current) => current.map((row) => row.watch_id === watchId ? { ...row, ...(data?.item || {}) } : row));
+      setProjectWatchMatchNoteById((current) => ({ ...current, [noteKey]: "" }));
+      setProjectWatchMessageById((current) => ({
+        ...current,
+        [watchId]: decision === "accept"
+          ? "Related Signal accepted as a review-context Observation. Verification and action eligibility did not change."
+          : decision === "not_related"
+            ? "Candidate marked Not Related and removed from attention."
+            : "Candidate ignored and removed from new-match attention.",
+      }));
+    } catch (error) {
+      setProjectWatchError(error instanceof Error ? error.message : "Failed to review related Signal.");
+    } finally {
+      setProjectWatchMutationKey("");
+    }
+  }
+
+  async function handleResolveProjectWatch(item: ProjectWatchItem) {
+    const watchId = item.watch_id || "";
+    const projectId = item.project_id || "";
+    const resolutionBasis = (projectWatchResolutionBasisById[watchId] || "").trim();
+    const resolutionNote = (projectWatchResolutionNoteById[watchId] || "").trim();
+    if (!watchId || !projectId || !resolutionBasis || !resolutionNote) {
+      setProjectWatchError("Resolution basis and resolution note are required.");
+      return;
+    }
+    setProjectWatchMutationKey(`${watchId}:resolve`);
+    setProjectWatchError("");
+    try {
+      const response = await adminFetch(
+        apiUrl(`/projects/${encodeURIComponent(projectId)}/watch-items/${encodeURIComponent(watchId)}/resolve`),
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ resolution_basis: resolutionBasis, resolution_note: resolutionNote }),
+        }
+      );
+      const data = (await response.json().catch(() => null)) as { item?: ProjectWatchItem; detail?: string } | null;
+      if (!response.ok) {
+        throw new Error(data?.detail || `Failed to resolve Watch (${response.status})`);
+      }
+      setProjectWatchItems((current) => current.filter((row) => row.watch_id !== watchId));
+    } catch (error) {
+      setProjectWatchError(error instanceof Error ? error.message : "Failed to resolve Watch.");
+    } finally {
+      setProjectWatchMutationKey("");
+    }
+  }
+
   return (
     <AppContainer style={{ paddingTop: "24px" }}>
       <RequireAdminAuth>
@@ -3862,7 +4077,7 @@ export default function ProjectTakeawayReviewPage() {
             onClick={() => setActiveView("watch")}
             style={activeView === "watch" ? activeTabStyle : tabButtonStyle}
           >
-            Watch ({candidateTabCount(watchItems.length)})
+            Watch ({candidateTabCount(totalWatchCount)}){projectWatchNewMatchCount > 0 ? ` · New ${projectWatchNewMatchCount}` : ""}
           </button>
           <button
             type="button"
@@ -4003,7 +4218,7 @@ export default function ProjectTakeawayReviewPage() {
             </div>
           </section>
         ) : null}
-        {activeView !== "records" ? (
+        {activeView !== "records" && activeView !== "watch" ? (
           <section style={candidateFilterPanelStyle}>
             <div>
               <div style={summaryLabelStyle}>Candidate Focus</div>
@@ -4048,6 +4263,192 @@ export default function ProjectTakeawayReviewPage() {
                 Missing Project Fit ({knowledgeMissingProjectFitCandidateCount})
               </button>
             </div>
+          </section>
+        ) : null}
+        {activeView === "watch" ? (
+          <section style={{ display: "grid", gap: "12px", marginBottom: "16px" }}>
+            <div style={candidateFilterPanelStyle}>
+              <div>
+                <div style={summaryLabelStyle}>Project Watch Attention</div>
+                <div style={{ color: "var(--app-text-muted)", fontSize: "13px", lineHeight: 1.6, marginTop: "4px" }}>
+                  Evidence follow-ups are independent Watch tasks. Observations remain review context only and never upgrade verification or Action eligibility.
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
+                <span style={summaryMiniChipStyle}>Active {projectWatchItems.length}</span>
+                <span style={summaryMiniChipStyle}>Due {projectWatchDueCount}</span>
+                <span style={projectWatchNewMatchCount > 0 ? { ...summaryMiniChipStyle, borderColor: "var(--app-info-border)", color: "var(--app-info-fg)", background: "var(--app-info-bg)" } : summaryMiniChipStyle}>
+                  New Matches {projectWatchNewMatchCount}
+                </span>
+                <button type="button" onClick={() => void loadProjectWatchItems()} style={secondaryButtonStyle}>
+                  {projectWatchLoading ? "Refreshing..." : "Refresh Watches"}
+                </button>
+              </div>
+            </div>
+            {projectWatchError ? <div style={errorCardStyle}>{projectWatchError}</div> : null}
+            {projectWatchLoading && projectWatchItems.length === 0 ? (
+              <div style={emptyCardStyle}>Loading Project Watch items...</div>
+            ) : projectWatchItems.length === 0 ? (
+              <div style={emptyCardStyle}>No active evidence-followup Watch items. Start one from an eligible Signal Detail page.</div>
+            ) : (
+              projectWatchItems.map((watch) => {
+                const watchId = watch.watch_id || "";
+                const latestObservation = (watch.observations || []).slice(-1)[0];
+                const unseenMatches = (watch.related_signal_candidates || []).filter((candidate) => candidate.status === "unseen");
+                const adding = projectWatchMutationKey === `${watchId}:observation`;
+                const resolving = projectWatchMutationKey === `${watchId}:resolve`;
+                return (
+                  <article key={watchId} style={{ ...candidateCardStyle, borderColor: watch.is_due ? "var(--app-warning-border)" : "var(--app-surface-border)" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: "12px", flexWrap: "wrap" }}>
+                      <div>
+                        <div style={summaryLabelStyle}>Evidence Follow-up · {watch.project_name || watch.project_id}</div>
+                        <h3 style={{ margin: "5px 0 0", color: "var(--app-text-strong)", fontSize: "17px" }}>
+                          {watch.watch_question || "Untitled Watch question"}
+                        </h3>
+                      </div>
+                      <span style={watch.is_due ? { ...summaryMiniChipStyle, borderColor: "var(--app-warning-border)", color: "var(--app-warning-fg)", background: "var(--app-warning-bg)" } : summaryMiniChipStyle}>
+                        {watch.is_due ? "Due now" : `Next ${watch.next_review_at?.slice(0, 10) || "not set"}`}
+                      </span>
+                    </div>
+                    <div style={detailGridStyle}>
+                      <div style={detailItemStyle}><span style={detailLabelStyle}>Reason</span><strong>{watch.watch_reason || "Not set"}</strong></div>
+                      <div style={detailItemStyle}><span style={detailLabelStyle}>Success criteria</span><strong>{watch.success_criteria || "Not set"}</strong></div>
+                      <div style={detailItemStyle}><span style={detailLabelStyle}>Exit criteria</span><strong>{watch.exit_criteria || "Not set"}</strong></div>
+                    </div>
+                    <div style={mutedBlockStyle}>
+                      <strong>Origin:</strong> {watch.origin_signal_title || watch.origin_signal_id || "Signal"}
+                      <span> / Observations {watch.observation_count || 0}</span>
+                      {latestObservation?.summary ? <span> / Latest: {latestObservation.summary}</span> : null}
+                    </div>
+                    {unseenMatches.length > 0 ? (
+                      <section style={{ border: "1px solid var(--app-info-border)", borderRadius: "10px", background: "var(--app-info-bg)", padding: "12px", display: "grid", gap: "10px" }}>
+                        <div>
+                          <div style={{ color: "var(--app-info-fg)", fontSize: "12px", fontWeight: 850, textTransform: "uppercase" }}>
+                            {unseenMatches.length} New Related Signal{unseenMatches.length === 1 ? "" : "s"}
+                          </div>
+                          <div style={{ color: "var(--app-text-muted)", fontSize: "12px", lineHeight: 1.5, marginTop: "4px" }}>
+                            Matcher output is a review candidate, not evidence. Accept only after checking the Signal and the stated reasons.
+                          </div>
+                        </div>
+                        {unseenMatches.map((candidate) => {
+                          const signalId = candidate.signal_id || "";
+                          const noteKey = `${watchId}:${signalId}`;
+                          const reviewingMatch = projectWatchMutationKey === `${noteKey}:match`;
+                          return (
+                            <div key={candidate.match_id || signalId} style={{ border: "1px solid var(--app-surface-border)", borderRadius: "8px", background: "var(--app-surface-bg)", padding: "10px", display: "grid", gap: "8px" }}>
+                              <div>
+                                <strong style={{ color: "var(--app-text-strong)" }}>{candidate.signal_title || signalId}</strong>
+                                {candidate.signal_summary ? <div style={{ color: "var(--app-text-muted)", fontSize: "12px", lineHeight: 1.5, marginTop: "4px" }}>{candidate.signal_summary}</div> : null}
+                              </div>
+                              <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                                {(candidate.match_reasons || []).map((reason) => (
+                                  <span key={reason.code} style={summaryMiniChipStyle} title={(reason.matched_terms || []).join(", ")}>
+                                    {reason.label || reason.code}
+                                    {(reason.matched_terms || []).length > 0 ? `: ${(reason.matched_terms || []).slice(0, 3).join(", ")}` : ""}
+                                  </span>
+                                ))}
+                              </div>
+                              <textarea
+                                value={projectWatchMatchNoteById[noteKey] || ""}
+                                onChange={(event) => setProjectWatchMatchNoteById((current) => ({ ...current, [noteKey]: event.target.value }))}
+                                placeholder="Reviewer note required for Accept: why is this Signal genuinely related?"
+                                rows={2}
+                                style={metadataTextareaStyle}
+                              />
+                              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
+                                <Link href={`/signals/detail?id=${encodeURIComponent(signalId)}`} style={secondaryLinkStyle}>
+                                  Review Signal
+                                </Link>
+                                <button type="button" disabled={reviewingMatch} onClick={() => void handleReviewProjectWatchMatch(watch, candidate, "accept")} style={watchButtonStyle}>
+                                  Accept as Observation
+                                </button>
+                                <button type="button" disabled={reviewingMatch} onClick={() => void handleReviewProjectWatchMatch(watch, candidate, "ignore")} style={secondaryButtonStyle}>
+                                  Ignore
+                                </button>
+                                <button type="button" disabled={reviewingMatch} onClick={() => void handleReviewProjectWatchMatch(watch, candidate, "not_related")} style={dangerButtonStyle}>
+                                  Not Related
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </section>
+                    ) : null}
+                    {projectWatchMessageById[watchId] ? <div style={successNoticeStyle}>{projectWatchMessageById[watchId]}</div> : null}
+                    <details style={metadataDetailsStyle}>
+                      <summary style={summaryDetailsSummaryStyle}>Add Observation</summary>
+                      <div style={metadataPanelStyle}>
+                        <div style={metadataColumnStyle}>
+                          <div style={metadataHeadingStyle}>Observation summary</div>
+                          <textarea
+                            value={projectWatchObservationById[watchId] || ""}
+                            onChange={(event) => setProjectWatchObservationById((current) => ({ ...current, [watchId]: event.target.value }))}
+                            placeholder="What changed? Record the observation without treating it as verified evidence."
+                            rows={3}
+                            style={metadataTextareaStyle}
+                          />
+                        </div>
+                        <div style={metadataColumnStyle}>
+                          <div style={metadataHeadingStyle}>Next review date (optional)</div>
+                          <input
+                            type="date"
+                            value={projectWatchNextReviewById[watchId] || ""}
+                            onChange={(event) => setProjectWatchNextReviewById((current) => ({ ...current, [watchId]: event.target.value }))}
+                            style={metadataInputStyle}
+                          />
+                          <button type="button" onClick={() => void handleAddProjectWatchObservation(watch)} disabled={adding} style={watchButtonStyle}>
+                            {adding ? "Adding..." : "Add Observation"}
+                          </button>
+                        </div>
+                      </div>
+                    </details>
+                    <details style={metadataDetailsStyle}>
+                      <summary style={summaryDetailsSummaryStyle}>Resolve Watch</summary>
+                      <div style={mutedBlockStyle}>
+                        Resolve only stops this Watch. It does not verify or disprove the underlying claim, and it does not grant Project Takeaway or Action eligibility. A success-criteria outcome is reviewer self-attestation, not a verification result.
+                      </div>
+                      <div style={metadataPanelStyle}>
+                        <div style={metadataColumnStyle}>
+                          <select
+                            value={projectWatchResolutionBasisById[watchId] || ""}
+                            onChange={(event) => setProjectWatchResolutionBasisById((current) => ({ ...current, [watchId]: event.target.value }))}
+                            style={metadataInputStyle}
+                          >
+                            <option value="">Select resolution basis</option>
+                            <option value="success_criteria_met">Success criteria met</option>
+                            <option value="exit_criteria_met">Exit criteria met</option>
+                            <option value="no_longer_relevant">No longer relevant</option>
+                            <option value="manual_close">Manual close</option>
+                          </select>
+                        </div>
+                        <div style={metadataColumnStyle}>
+                          <textarea
+                            value={projectWatchResolutionNoteById[watchId] || ""}
+                            onChange={(event) => setProjectWatchResolutionNoteById((current) => ({ ...current, [watchId]: event.target.value }))}
+                            placeholder="Required: explain why observation should stop."
+                            rows={3}
+                            style={metadataTextareaStyle}
+                          />
+                          <button type="button" onClick={() => void handleResolveProjectWatch(watch)} disabled={resolving} style={dangerButtonStyle}>
+                            {resolving ? "Resolving..." : "Resolve Watch"}
+                          </button>
+                        </div>
+                      </div>
+                    </details>
+                    {watch.origin_signal_id ? (
+                      <Link href={`/signals/detail?id=${encodeURIComponent(watch.origin_signal_id)}`} style={secondaryLinkStyle}>
+                        Open Origin Signal
+                      </Link>
+                    ) : null}
+                  </article>
+                );
+              })
+            )}
+            {watchItems.length > 0 ? (
+              <div style={mutedBlockStyle}>
+                Legacy Project Takeaway Watch items appear below. They continue to use the existing Add Watch Follow-up path and are not migrated automatically.
+              </div>
+            ) : null}
           </section>
         ) : null}
         {confirmedItem ? (
@@ -4832,7 +5233,9 @@ export default function ProjectTakeawayReviewPage() {
               : activeView === "pending"
                 ? "No project takeaway candidates are waiting for review. Create one from a verified signal Evidence Note."
               : activeView === "watch"
-                ? "No project takeaway candidates are on the watch list yet."
+                ? projectWatchItems.length > 0
+                  ? "No legacy Project Takeaway Watch items are active. Evidence-followup Watch items are shown above."
+                  : "No Project Watch items are active yet. Start one from an eligible Signal Detail page."
                 : activeView === "action"
                   ? "No project takeaway candidates are marked for action yet."
                   : "No reviewed project takeaway candidates yet."}

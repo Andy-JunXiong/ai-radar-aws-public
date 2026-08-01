@@ -333,6 +333,10 @@ class SignalRouteTests(unittest.TestCase):
         ), patch.object(
             signals_route, "_soft_record_generate_insight_lifecycle_events"
         ) as lifecycle_mock, patch.object(
+            signals_route,
+            "_soft_match_generated_signal_to_watches",
+            return_value={"created_count": 1, "scanned_watch_count": 2, "matches": []},
+        ) as watch_match_mock, patch.object(
             signals_route, "write_signal_insight_debug_record", return_value="debug.json"
         ):
             result = signals_route.generate_insight_for_signal(
@@ -346,6 +350,7 @@ class SignalRouteTests(unittest.TestCase):
         self.assertEqual(result["verification"]["verification_status"], "verified_with_limitations")
         self.assertEqual(result["verified_insight_id"], "vi_auto_1")
         self.assertEqual(result["updated_keys"], ["signals/latest/signals.json"])
+        self.assertEqual(result["watch_match_summary"]["created_count"], 1)
         generated_signal_arg = generate_mock.call_args.args[0]
         self.assertEqual(
             generated_signal_arg["source_excerpt"],
@@ -360,6 +365,8 @@ class SignalRouteTests(unittest.TestCase):
         self.assertEqual(lifecycle_kwargs["status_after"], "analyzed")
         self.assertEqual(lifecycle_kwargs["verification"], generated["verification"])
         self.assertEqual(lifecycle_kwargs["generated_fingerprint"], "new-fingerprint")
+        watch_match_mock.assert_called_once()
+        self.assertEqual(watch_match_mock.call_args.args[0]["signal_id"], "sig-1")
 
     def test_generate_insight_for_manual_session_persists_evidence_pack(self):
         manual_signal = {
@@ -451,6 +458,10 @@ class SignalRouteTests(unittest.TestCase):
         ), patch.object(
             signals_route, "_soft_record_generate_insight_lifecycle_events"
         ) as lifecycle_mock, patch.object(
+            signals_route,
+            "_soft_match_generated_signal_to_watches",
+            return_value={"created_count": 1, "scanned_watch_count": 1, "matches": []},
+        ) as watch_match_mock, patch.object(
             signals_route, "write_signal_insight_debug_record", return_value="debug.json"
         ), patch.object(
             signals_route, "utc_now_iso", return_value="2026-04-27T00:00:00Z"
@@ -475,6 +486,7 @@ class SignalRouteTests(unittest.TestCase):
         self.assertEqual(result["verification"]["verification_status"], "weak_evidence")
         self.assertEqual(result["verified_insight_id"], "vi_manual_1")
         self.assertEqual(result["verification"]["verified_insight"]["id"], "vi_manual_1")
+        self.assertEqual(result["watch_match_summary"]["created_count"], 1)
         self.assertTrue(saved_payloads)
         self.assertEqual(saved_payloads[0]["evidence_pack"], generated["evidence_pack"])
         self.assertEqual(saved_payloads[0]["verification"]["verified_insight"]["status"], "weak_evidence")
@@ -487,6 +499,7 @@ class SignalRouteTests(unittest.TestCase):
         self.assertEqual(lifecycle_kwargs["status_before"], "analyzed")
         self.assertEqual(lifecycle_kwargs["status_after"], "analyzed")
         self.assertEqual(lifecycle_kwargs["verification"], generated["verification"])
+        watch_match_mock.assert_called_once()
 
     def test_generate_insight_lifecycle_soft_recording_is_best_effort(self):
         with patch.object(

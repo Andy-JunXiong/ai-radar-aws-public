@@ -27,6 +27,14 @@ function wantsNextStep(question: string) {
     "why",
     "recommend",
     "record watch",
+    "start project watch",
+    "resolve watch",
+    "add observation",
+    "watch matcher",
+    "related signal",
+    "new matches",
+    "accept as observation",
+    "not related",
     "watch follow-up",
     "watch follow up",
     "add watch",
@@ -620,6 +628,16 @@ export function buildStateAwareGuidanceResponse(
   const isTrajectoryTimeline = path.startsWith("/workspace/projects/trajectory");
   const meaningQuestion = asksPageMeaning(question) && !asksActionRecommendation(question);
   const watchFollowupQuestion = asksWatchFollowup(question, pageText);
+  const startProjectWatchQuestion = hasAny(normalize(question), ["start project watch", "create project watch"]);
+  const addProjectWatchObservationQuestion = hasAny(normalize(question), ["add observation", "watch observation"]);
+  const resolveProjectWatchQuestion = hasAny(normalize(question), ["resolve watch", "close project watch"]);
+  const relatedWatchMatchQuestion = hasAny(normalize(question), [
+    "watch matcher",
+    "related signal",
+    "new matches",
+    "accept as observation",
+    "not related",
+  ]);
   const aiDiscussionChallengeQuestion = asksAiDiscussionChallenge(question, pageText);
   const aiDiscussionThinkingStyleQuestion = asksAiDiscussionThinkingStyle(question, pageText);
   const claimReviewFeedbackQuestion = asksClaimReviewFeedback(question, pageText);
@@ -686,6 +704,22 @@ export function buildStateAwareGuidanceResponse(
         "It does not change Pending, Saved, Analyzed, Completed, or Rejected status.",
         `${suggestedButton(language, "Starred filter")} Use the Starred filter on the Signal Timeline to find bookmarked signals again.`,
         "Use Save for Later instead when the workflow decision is to pause the signal for future review.",
+      ]
+    );
+  }
+
+  if (isSignalDetail && startProjectWatchQuestion) {
+    return formatAnswer(
+      language,
+      [
+        "Start Project Watch creates a project-scoped evidence follow-up from this Signal without changing Signal status or verification level.",
+        "Creation requires the current verification policy to allow watch_only, plus a Watch question, reason, success criteria, exit criteria, and next review date.",
+        `${suggestedButton(language, "Start Project Watch")} After creation, use the Watch tab in Project Review Inbox. Observations remain review context only and cannot unlock Project Takeaway or Action eligibility.`,
+      ],
+      [
+        "Start Project Watch creates a project-scoped evidence follow-up from this Signal without changing Signal status or verification level.",
+        "Creation requires the current verification policy to allow watch_only, plus a Watch question, reason, success criteria, exit criteria, and next review date.",
+        `${suggestedButton(language, "Start Project Watch")} After creation, use the Watch tab in Project Review Inbox. Observations remain review context only and cannot unlock Project Takeaway or Action eligibility.`,
       ]
     );
   }
@@ -859,6 +893,54 @@ export function buildStateAwareGuidanceResponse(
   }
 
   if (isProjectReviewInbox) {
+    if (relatedWatchMatchQuestion) {
+      return formatAnswer(
+        language,
+        [
+          "Watch Matcher runs automatically after Generate Insight succeeds and places deterministic matches under New Related Signals for active Watches.",
+          "Reasons come from explainable overlap with project links, the origin Signal, the Watch question, and success or exit criteria. The result is review_candidate_only, not evidence.",
+          `${suggestedButton(language, "Review Signal")} Inspect the Signal first. Accept as Observation requires a reviewer note and only writes a review_context_only Observation; Ignore and Not Related write no Observation.`,
+        ],
+        [
+          "Watch Matcher runs automatically after Generate Insight succeeds and places deterministic matches under New Related Signals for active Watches.",
+          "Reasons come from explainable overlap with project links, the origin Signal, the Watch question, and success or exit criteria. The result is review_candidate_only, not evidence.",
+          `${suggestedButton(language, "Review Signal")} Inspect the Signal first. Accept as Observation requires a reviewer note and only writes a review_context_only Observation; Ignore and Not Related write no Observation.`,
+        ]
+      );
+    }
+
+    if (resolveProjectWatchQuestion) {
+      return formatAnswer(
+        language,
+        [
+          "Resolve Watch only stops observation. It does not verify or disprove the underlying claim, and it does not grant Project Takeaway or Action eligibility.",
+          "Choose a resolution basis and write the required resolution note. Success criteria met is reviewer self-attestation, not a verification result.",
+          `${suggestedButton(language, "Resolve Watch")} Resolve only when continued observation is no longer needed; use the evidence and verification path for any stronger conclusion.`,
+        ],
+        [
+          "Resolve Watch only stops observation. It does not verify or disprove the underlying claim, and it does not grant Project Takeaway or Action eligibility.",
+          "Choose a resolution basis and write the required resolution note. Success criteria met is reviewer self-attestation, not a verification result.",
+          `${suggestedButton(language, "Resolve Watch")} Resolve only when continued observation is no longer needed; use the evidence and verification path for any stronger conclusion.`,
+        ]
+      );
+    }
+
+    if (addProjectWatchObservationQuestion) {
+      return formatAnswer(
+        language,
+        [
+          "Add Observation appends review context to an evidence-followup Watch and can update its next review date.",
+          "The server fixes its evidence role as review_context_only. Any number of observations still cannot change verification_status, Action eligibility, or blocked_downstream_actions.",
+          `${suggestedButton(language, "Add Observation")} Record what changed; use the normal evidence and verification path if the material should become evidence.`,
+        ],
+        [
+          "Add Observation appends review context to an evidence-followup Watch and can update its next review date.",
+          "The server fixes its evidence role as review_context_only. Any number of observations still cannot change verification_status, Action eligibility, or blocked_downstream_actions.",
+          `${suggestedButton(language, "Add Observation")} Record what changed; use the normal evidence and verification path if the material should become evidence.`,
+        ]
+      );
+    }
+
     if (asksReasoningAssessmentAdvisory(question, pageText)) {
       return formatAnswer(
         language,

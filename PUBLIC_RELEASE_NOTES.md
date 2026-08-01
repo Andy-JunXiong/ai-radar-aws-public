@@ -39,3 +39,16 @@ not include that repository's Git history.
   check is registered as a local pre-commit hook.
 
 No credentials or private data are required to inspect the source code.
+
+## 2026-08-02 Snapshot Update
+
+- added the verified-insight contract and lineage hardening changes;
+- added Project Watch evidence follow-ups and deterministic, explainable
+  related-Signal review candidates;
+- added the LMArena official collector path without publishing the private
+  subscription library;
+- added public-safe calibration tools and tests while excluding their private
+  reports, labels, runtime records, and status history;
+- documented that private and public repositories are synchronized through
+  separate commits and independent history, never by pushing private history
+  to the public repository.

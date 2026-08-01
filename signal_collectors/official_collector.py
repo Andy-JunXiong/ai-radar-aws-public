@@ -92,6 +92,16 @@ SOURCE_CONFIGS = [
         "base_url": "https://ai.meta.com",
         "allowed_prefixes": ["/blog/"],
     },
+    {
+        "source": "lmarena",
+        "source_type": "official",
+        "author": "LMArena",
+        "category": "AI Evaluation",
+        "list_url": "https://arena.ai/blog/",
+        "base_url": "https://arena.ai",
+        "allowed_prefixes": ["/blog/"],
+        "excluded_prefixes": ["/blog/category/"],
+    },
 ]
 
 
@@ -242,6 +252,7 @@ def extract_links_from_list_page(
     base_url: str,
     allowed_prefixes: List[str],
     limit: int = 10,
+    excluded_prefixes: Optional[List[str]] = None,
 ) -> List[str]:
     soup = BeautifulSoup(html, "lxml")
     results: List[str] = []
@@ -260,6 +271,12 @@ def extract_links_from_list_page(
             candidate_path_ok = any(href.startswith(prefix) for prefix in allowed_prefixes)
 
         if not candidate_path_ok:
+            continue
+
+        if excluded_prefixes and any(
+            href.startswith(prefix) or prefix in full_url
+            for prefix in excluded_prefixes
+        ):
             continue
 
         if full_url in seen:
@@ -394,6 +411,7 @@ def collect_from_source(config: Dict, per_source_limit: int = 10) -> List[Dict]:
         base_url=config["base_url"],
         allowed_prefixes=config["allowed_prefixes"],
         limit=per_source_limit,
+        excluded_prefixes=config.get("excluded_prefixes"),
     )
 
     results: List[Dict] = []

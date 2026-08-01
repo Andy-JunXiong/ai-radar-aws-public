@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 
 from app.services.llm_executor_service import execute_text_json_task
 from app.services.model_router_service import PROVIDER_ANTHROPIC, PROVIDER_OPENAI
+from app.services.reasoning_assessment_service import build_reasoning_assessment
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -206,7 +207,7 @@ def generate_reasoning_counter_check(payload: dict[str, Any]) -> dict[str, Any]:
     if answer not in {"yes", "no", "unclear"}:
         answer = "unclear"
 
-    return {
+    result = {
         "answer": answer,
         "summary": _clean_text(parsed.get("summary"), limit=900),
         "opposite_or_incompatible_conclusion": _clean_text(
@@ -232,3 +233,8 @@ def generate_reasoning_counter_check(payload: dict[str, Any]) -> dict[str, Any]:
             "provenance_completeness": "route_only",
         },
     }
+    result["reasoning_assessment"] = build_reasoning_assessment(
+        payload=payload,
+        counter_check=result,
+    )
+    return result

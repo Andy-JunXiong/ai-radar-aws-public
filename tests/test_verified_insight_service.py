@@ -10,7 +10,27 @@ BACKEND_ROOT = REPO_ROOT / "backend"
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
-from app.services.verified_insight_service import build_verified_insight_metadata  # noqa: E402
+from app.services.verified_insight_service import (  # noqa: E402
+    VerificationMetadataContractError,
+    build_verified_insight_metadata,
+    validate_new_verified_insight_metadata,
+)
+
+
+def evidence_pack(signal_id):
+    return {
+        "source_signal_id": signal_id,
+        "evidence_items": [
+            {
+                "evidence_id": f"ev_{signal_id}_summary",
+                "source_id": signal_id,
+                "source_field": "summary",
+                "content": "Evidence content for the test claim.",
+                "provenance": "collector_extracted",
+                "traceable": True,
+            }
+        ],
+    }
 
 
 class VerifiedInsightServiceTests(unittest.TestCase):
@@ -28,6 +48,7 @@ class VerifiedInsightServiceTests(unittest.TestCase):
             evidence_quality={"level": "strong"},
             low_evidence_gate={"decision_card_allowed": True},
             generation_mode="llm",
+            evidence_pack_id="sig-1",
         )
 
         self.assertTrue(result["verified_insight_id"].startswith("vi_"))
@@ -80,10 +101,12 @@ class VerifiedInsightServiceTests(unittest.TestCase):
                     "claim_text": "This proves a broad market trend.",
                     "claim_type": "trend",
                     "support_level": "partially_supported",
+                    "evidence_refs": ["ev_sig-4_summary"],
                     "verification_notes": ["single_source_trend_claim_downgraded"],
                 }
             ],
             evidence_pack_id="sig-4",
+            evidence_pack=evidence_pack("sig-4"),
         )
 
         self.assertEqual(result["verification_status"], "partially_verified")
@@ -128,6 +151,7 @@ class VerifiedInsightServiceTests(unittest.TestCase):
                 }
             ],
             evidence_pack_id="sig-5",
+            evidence_pack=evidence_pack("sig-5"),
         )
 
         self.assertEqual(result["verification_status"], "unsupported")
@@ -162,6 +186,7 @@ class VerifiedInsightServiceTests(unittest.TestCase):
                 }
             ],
             evidence_pack_id="sig-borrowed-shell",
+            evidence_pack=evidence_pack("sig-borrowed-shell"),
         )
 
         self.assertEqual(result["verification_status"], "weakly_supported")
@@ -198,10 +223,71 @@ class VerifiedInsightServiceTests(unittest.TestCase):
             low_evidence_gate={"decision_card_allowed": True},
             generation_mode="llm",
             produced_by_model=produced_by_model,
+            evidence_pack_id="sig-6",
         )
 
         self.assertEqual(result["produced_by_model"], produced_by_model)
         self.assertEqual(result["verified_insight"]["produced_by_model"], produced_by_model)
+
+    def test_verified_status_requires_evidence_pack_id(self):
+        with self.assertRaises(VerificationMetadataContractError) as raised:
+            build_verified_insight_metadata(
+                signal_id="sig-missing-pack",
+                content_fingerprint="missing-pack",
+                evidence_quality={"level": "strong"},
+                low_evidence_gate={"decision_card_allowed": True},
+                generation_mode="llm",
+            )
+
+        self.assertEqual(raised.exception.code, "missing_evidence_pack_id")
+
+    def test_unknown_evidence_level_is_rejected(self):
+        with self.assertRaises(VerificationMetadataContractError) as raised:
+            build_verified_insight_metadata(
+                signal_id="sig-unknown-level",
+                content_fingerprint="unknown-level",
+                evidence_quality={"level": "excellent"},
+                low_evidence_gate={"decision_card_allowed": True},
+                generation_mode="llm",
+            )
+
+        self.assertEqual(raised.exception.code, "invalid_evidence_level")
+
+    def test_unknown_claim_support_level_is_rejected(self):
+        with self.assertRaises(VerificationMetadataContractError) as raised:
+            build_verified_insight_metadata(
+                signal_id="sig-unknown-support",
+                content_fingerprint="unknown-support",
+                evidence_quality={"level": "strong"},
+                low_evidence_gate={"decision_card_allowed": True},
+                generation_mode="llm",
+                claim_results=[
+                    {
+                        "claim_id": "claim_1",
+                        "support_level": "mostly_supported",
+                    }
+                ],
+                evidence_pack_id="sig-unknown-support",
+                evidence_pack=evidence_pack("sig-unknown-support"),
+            )
+
+        self.assertEqual(raised.exception.code, "invalid_claim_support_level")
+
+    def test_allowed_and_blocked_action_conflict_is_rejected(self):
+        metadata = build_verified_insight_metadata(
+            signal_id="sig-conflict",
+            content_fingerprint="conflict",
+            evidence_quality={"level": "thin"},
+            low_evidence_gate={"decision_card_allowed": "watch_only"},
+            generation_mode="llm",
+        )
+        metadata["blocked_downstream_actions"].append("watch_only")
+        metadata["verified_insight"]["action_policy"]["blocked"].append("watch_only")
+
+        with self.assertRaises(VerificationMetadataContractError) as raised:
+            validate_new_verified_insight_metadata(metadata)
+
+        self.assertEqual(raised.exception.code, "conflicting_downstream_actions")
 
 
 if __name__ == "__main__":

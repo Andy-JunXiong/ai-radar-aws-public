@@ -63,6 +63,15 @@ from app.services.project_takeaway_constants import (
 from app.services.project_takeaway_candidate_policy import (
     build_project_takeaway_candidate_input,
 )
+from app.services.project_watch_service import (
+    WATCH_MATCH_DECISIONS,
+    WATCH_RESOLUTION_BASES,
+    add_project_watch_observation,
+    create_project_watch_item,
+    list_project_watch_items,
+    review_project_watch_match,
+    resolve_project_watch_item,
+)
 from app.services.project_trajectory_event_service import build_trajectory_events_response
 from app.services.reasoning_counter_check_service import generate_reasoning_counter_check
 from app.services.s3_reader import get_signal_by_id
@@ -136,6 +145,19 @@ def _attach_signal_model_provenance(
     return enriched
 
 
+def _signal_verification_metadata(signal: dict) -> dict:
+    direct = signal.get("verification_metadata")
+    if isinstance(direct, dict) and direct:
+        return direct
+    verification = signal.get("verification")
+    if isinstance(verification, dict) and verification:
+        return verification
+    policy_metadata = signal.get("policy_metadata")
+    if isinstance(policy_metadata, dict) and isinstance(policy_metadata.get("verification"), dict):
+        return policy_metadata["verification"]
+    return {}
+
+
 def _load_model_attribution_candidates(project_id: str | None = None) -> list[dict[str, object]]:
     target_project_id = str(project_id or "").strip()
     candidates: list[dict[str, object]] = []
@@ -204,6 +226,31 @@ class ProjectTakeawayReviewActionRequest(BaseModel):
     followup_result: str = ""
     evidence_update: str = ""
     next_review_date: str = ""
+
+
+class ProjectWatchCreateRequest(BaseModel):
+    origin_signal_id: str
+    watch_question: str
+    watch_reason: str
+    success_criteria: str
+    exit_criteria: str
+    next_review_at: str
+
+
+class ProjectWatchObservationRequest(BaseModel):
+    summary: str
+    source_signal_id: str = ""
+    next_review_at: str = ""
+
+
+class ProjectWatchResolveRequest(BaseModel):
+    resolution_basis: str
+    resolution_note: str
+
+
+class ProjectWatchMatchDecisionRequest(BaseModel):
+    decision: str
+    review_note: str = ""
 
 
 class ReasoningCounterCheckRequest(BaseModel):
@@ -540,6 +587,154 @@ def create_reasoning_counter_check_draft(payload: ReasoningCounterCheckRequest):
         "item": persisted_item,
         "persisted": persisted_item is not None,
         "message": "counter-check draft generated and persisted as reviewer advisory only",
+    }
+
+
+@router.get("/projects/watch-items", dependencies=[Depends(require_admin_auth)])
+def get_all_project_watch_items(state: str = Query(default="active")):
+    items: list[dict] = []
+    for project in list_active_projects():
+        project_id = str(project.get("project_id") or "").strip()
+        if not project_id:
+            continue
+        for item in list_project_watch_items(project_id, state=state):
+            items.append({**item, "project_name": str(project.get("name") or project_id)})
+    items.sort(
+        key=lambda item: (
+            not bool(item.get("is_due")),
+            str(item.get("next_review_at") or "9999-12-31T23:59:59+00:00"),
+        )
+    )
+    return {
+        "items": items,
+        "summary": {
+            "total": len(items),
+            "due": sum(1 for item in items if item.get("is_due")),
+            "needs_plan": sum(1 for item in items if item.get("needs_plan")),
+            "new_matches": sum(int(item.get("new_match_count") or 0) for item in items),
+        },
+        "message": "project watch items loaded successfully",
+    }
+
+
+@router.get("/projects/{project_id}/watch-items", dependencies=[Depends(require_admin_auth)])
+def get_project_watch_items(project_id: str, state: str = Query(default="")):
+    project = get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found.")
+    items = list_project_watch_items(project_id, state=state)
+    return {
+        "project": project,
+        "items": items,
+        "message": "project watch items loaded successfully",
+    }
+
+
+@router.post("/projects/{project_id}/watch-items", dependencies=[Depends(require_admin_auth)])
+def create_project_watch(project_id: str, payload: ProjectWatchCreateRequest):
+    project = get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found.")
+    signal = get_signal_by_id(payload.origin_signal_id)
+    if not isinstance(signal, dict):
+        raise HTTPException(status_code=404, detail="Origin Signal not found.")
+    try:
+        item = create_project_watch_item(
+            project_id,
+            origin_signal_id=payload.origin_signal_id,
+            origin_signal_title=str(signal.get("title") or signal.get("signal_title") or ""),
+            watch_question=payload.watch_question,
+            watch_reason=payload.watch_reason,
+            success_criteria=payload.success_criteria,
+            exit_criteria=payload.exit_criteria,
+            next_review_at=payload.next_review_at,
+            verification_metadata=_signal_verification_metadata(signal),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "project": project,
+        "item": item,
+        "message": "project watch item created successfully",
+    }
+
+
+@router.post("/projects/{project_id}/watch-items/{watch_id}/observations", dependencies=[Depends(require_admin_auth)])
+def add_project_watch_item_observation(
+    project_id: str,
+    watch_id: str,
+    payload: ProjectWatchObservationRequest,
+):
+    if not get_project(project_id):
+        raise HTTPException(status_code=404, detail="Project not found.")
+    try:
+        item = add_project_watch_observation(
+            project_id,
+            watch_id,
+            summary=payload.summary,
+            source_signal_id=payload.source_signal_id,
+            next_review_at=payload.next_review_at,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "item": item,
+        "message": "project watch observation added successfully",
+    }
+
+
+@router.post("/projects/{project_id}/watch-items/{watch_id}/resolve", dependencies=[Depends(require_admin_auth)])
+def resolve_project_watch(
+    project_id: str,
+    watch_id: str,
+    payload: ProjectWatchResolveRequest,
+):
+    if not get_project(project_id):
+        raise HTTPException(status_code=404, detail="Project not found.")
+    if payload.resolution_basis not in WATCH_RESOLUTION_BASES:
+        raise HTTPException(status_code=400, detail="Invalid Watch resolution basis.")
+    try:
+        item = resolve_project_watch_item(
+            project_id,
+            watch_id,
+            resolution_basis=payload.resolution_basis,
+            resolution_note=payload.resolution_note,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "item": item,
+        "message": "project watch item resolved successfully",
+    }
+
+
+@router.post(
+    "/projects/{project_id}/watch-items/{watch_id}/matches/{signal_id}/decision",
+    dependencies=[Depends(require_admin_auth)],
+)
+def review_project_watch_related_signal(
+    project_id: str,
+    watch_id: str,
+    signal_id: str,
+    payload: ProjectWatchMatchDecisionRequest,
+):
+    if not get_project(project_id):
+        raise HTTPException(status_code=404, detail="Project not found.")
+    if payload.decision not in WATCH_MATCH_DECISIONS:
+        raise HTTPException(status_code=400, detail="Invalid related Signal decision.")
+    try:
+        result = review_project_watch_match(
+            project_id,
+            watch_id,
+            signal_id,
+            decision=payload.decision,
+            review_note=payload.review_note,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        **result,
+        "message": "project watch related Signal reviewed successfully",
     }
 
 

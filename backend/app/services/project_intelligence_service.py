@@ -29,6 +29,7 @@ from app.services.github_project_reader import (
 from app.services.llm_executor_service import execute_text_json_task
 from app.services.project_calibration_event_service import append_project_calibration_event
 from app.services.project_review_record_service import append_project_review_record
+from app.services.reasoning_assessment_service import validate_reasoning_assessment
 from app.services.project_takeaway_constants import (
     ACTION_STATE_COMPLETED,
     EVENT_TYPE_BY_ACTION_STATE,
@@ -893,6 +894,9 @@ def save_reasoning_counter_check_draft(
         raise ValueError("project_id and signal_id are required to persist a counter-check draft.")
     if not isinstance(draft, dict) or not draft:
         raise ValueError("counter-check draft is required.")
+    reasoning_assessment = draft.get("reasoning_assessment")
+    if reasoning_assessment is not None:
+        reasoning_assessment = validate_reasoning_assessment(reasoning_assessment)
 
     payload = load_project_improvements(normalized_project_id)
     items = payload.get("items", [])
@@ -908,6 +912,8 @@ def save_reasoning_counter_check_draft(
                 "reasoning_counter_check_saved_at": saved_at,
                 "reasoning_counter_check_effect": "reviewer_advisory_only",
             }
+            if reasoning_assessment is not None:
+                updated["reasoning_assessment"] = reasoning_assessment
             items[index] = updated
             save_project_improvements(normalized_project_id, {"items": items})
             return updated

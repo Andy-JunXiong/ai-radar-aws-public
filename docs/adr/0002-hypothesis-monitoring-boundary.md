@@ -53,6 +53,38 @@ be tracked over time, but the default status is **proposed**, not active.
 Proposed hypothesis watches are planning and review objects. They do not run
 scrapers, collectors, monitors, scheduled jobs, or automatic downstream actions.
 
+This boundary distinguishes two Watch categories:
+
+```text
+evidence_followup  !=  hypothesis_monitor
+```
+
+An `evidence_followup` is a project-scoped, human-created follow-up task whose
+origin is an eligible Signal. It schedules human review and stores
+human-accepted observations. After Generate Insight succeeds, a deterministic
+matcher may compare that Signal with active evidence follow-ups and create an
+explainable `review_candidate_only` attention item. It does not run a scheduled
+monitor, activate a collector, or evaluate whether a strategic hypothesis is
+becoming true.
+
+A `hypothesis_monitor` is the deferred active-monitoring category. Scheduled
+evaluation, raw-ingestion-triggered alerts, LLM or embedding matching, and topic
+or entity monitoring belong to that category and remain unapproved by this
+ADR. The post-Generate-Insight deterministic matcher is not a hypothesis
+monitor: it creates no Observation until a human accepts the candidate, and it
+does not change evidence, verification, or downstream eligibility.
+
+An evidence-followup Observation is always review context:
+
+```text
+evidence_role = review_context_only
+```
+
+The number or accumulation of Observations must not change verification status,
+count as claim support, create Project Takeaway or Action eligibility, or bypass
+`blocked_downstream_actions`. Any promotion into stronger evidence semantics
+requires an explicit evidence and verification path.
+
 A hypothesis watch is allowed to own:
 
 - the hypothesis statement
@@ -71,10 +103,19 @@ A hypothesis watch does not own:
 - low-risk Action eligibility
 - bypassing verification or blocked downstream gates
 
-Activation requires a later explicit implementation decision. That decision
-should define schema, storage path, ingestion source, review surface, and test
-coverage. Until then, proposed hypothesis watches remain documentation-level
-objects.
+An `evidence_followup` additionally does not own:
+
+- scheduled or collector-level related-Signal discovery
+- automatic acceptance of a related-Signal candidate
+- verification-status mutation
+- claim-support accumulation
+- Project Takeaway candidate creation
+- Action creation or eligibility
+
+Activation of a `hypothesis_monitor` requires a later explicit implementation
+decision. That decision should define schema, storage path, ingestion source,
+review surface, and test coverage. Until then, proposed hypothesis watches
+remain documentation-level objects.
 
 ## Owns
 
@@ -130,10 +171,13 @@ active monitors.
 
 ## Implementation Plan
 
-1. Add this ADR as the boundary record.
-2. Do not create `signal/state-monitor/` yet.
-3. Treat `agent-team-skill-loop-watch` as a proposed future hypothesis example.
-4. If a later sprint activates hypothesis monitoring, create a separate ADR or
+1. Keep project-scoped `evidence_followup` creation and candidate acceptance
+   human-controlled and verification-neutral.
+2. Allow only the explainable post-Generate-Insight deterministic matcher to
+   create `review_candidate_only` attention items for active follow-ups.
+3. Do not create `signal/state-monitor/` yet.
+4. Treat `agent-team-skill-loop-watch` as a proposed future hypothesis example.
+5. If a later sprint activates hypothesis monitoring, create a separate ADR or
    implementation plan covering schema, storage, review path, and validation.
 
 ## References

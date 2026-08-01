@@ -584,6 +584,20 @@ type ProjectTakeawayCandidatesResponse = {
   items?: ProjectTakeawayCandidate[];
 };
 
+type ProjectOption = {
+  project_id?: string;
+  name?: string;
+  enabled?: boolean;
+  status?: string;
+};
+
+type ProjectWatchItem = {
+  watch_id?: string;
+  project_id?: string;
+  state?: string;
+  next_review_at?: string;
+};
+
 type ReviewBundleSnapshotsResponse = {
   items?: ReviewBundleSnapshot[];
 };
@@ -619,6 +633,12 @@ type GenerateInsightResponse = {
   summary?: string;
   why_it_matters?: string;
   relevance_to_projects?: string;
+  watch_match_summary?: {
+    scanned_watch_count?: number;
+    created_count?: number;
+    existing_count?: number;
+    error?: string;
+  };
   relevance_to_career?: string;
   synthesized_insight?: string;
   provider_used?: string;
@@ -2500,6 +2520,7 @@ export default function SignalDetailClient() {
   const [starUpdating, setStarUpdating] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
   const [statusError, setStatusError] = useState("");
+  const [watchMatchPromptCount, setWatchMatchPromptCount] = useState(0);
   const [decisionEditingUnlocked, setDecisionEditingUnlocked] = useState(false);
   const [decisionLockActive, setDecisionLockActive] = useState(false);
   const [insightGenerating, setInsightGenerating] = useState(false);
@@ -2546,6 +2567,17 @@ export default function SignalDetailClient() {
   const [projectCandidateMessage, setProjectCandidateMessage] = useState("");
   const [projectCandidateError, setProjectCandidateError] = useState("");
   const [projectTakeawayOverrideConfirmed, setProjectTakeawayOverrideConfirmed] = useState(false);
+  const [watchProjects, setWatchProjects] = useState<ProjectOption[]>([]);
+  const [watchProjectId, setWatchProjectId] = useState("");
+  const [watchQuestion, setWatchQuestion] = useState("");
+  const [watchReason, setWatchReason] = useState("");
+  const [watchSuccessCriteria, setWatchSuccessCriteria] = useState("");
+  const [watchExitCriteria, setWatchExitCriteria] = useState("");
+  const [watchNextReviewAt, setWatchNextReviewAt] = useState("");
+  const [watchCreating, setWatchCreating] = useState(false);
+  const [watchCreatedItem, setWatchCreatedItem] = useState<ProjectWatchItem | null>(null);
+  const [watchMessage, setWatchMessage] = useState("");
+  const [watchError, setWatchError] = useState("");
   const [deepProjectMatchReviewNote, setDeepProjectMatchReviewNote] = useState("");
   const [deepProjectMatchAnalysis, setDeepProjectMatchAnalysis] = useState<DeepProjectMatchGeneratedAnalysis | null>(null);
   const [deepProjectMatchAnalysisLayers, setDeepProjectMatchAnalysisLayers] = useState<DeepProjectMatchGeneratedAnalysis[]>([]);
@@ -2973,6 +3005,46 @@ export default function SignalDetailClient() {
       controller.abort();
     };
   }, [id, insight, confirmedFinalTakeaway?.final_takeaway_id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const controller = new AbortController();
+
+    async function loadWatchProjects() {
+      try {
+        const response = await adminFetch(`${API_BASE}/projects`, { signal: controller.signal });
+        const data = (await response.json().catch(() => null)) as { items?: ProjectOption[] } | null;
+        if (!response.ok || cancelled) return;
+        const projects = (data?.items || []).filter(
+          (project) => project.project_id && project.enabled !== false && project.status !== "archived"
+        );
+        setWatchProjects(projects);
+        setWatchProjectId((current) => {
+          if (current && projects.some((project) => project.project_id === current)) return current;
+          const linkedProjectIds = new Set(
+            (insight?.subscription_project_links || []).map((link) => String(link.project_id || ""))
+          );
+          return projects.find((project) => linkedProjectIds.has(String(project.project_id || "")))?.project_id
+            || projects[0]?.project_id
+            || "";
+        });
+        setWatchNextReviewAt((current) => {
+          if (current) return current;
+          const reviewDate = new Date();
+          reviewDate.setDate(reviewDate.getDate() + 14);
+          return reviewDate.toISOString().slice(0, 10);
+        });
+      } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") return;
+      }
+    }
+
+    void loadWatchProjects();
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [insight?.subscription_project_links]);
 
   useEffect(() => {
     if (!insight) {
@@ -3611,6 +3683,8 @@ export default function SignalDetailClient() {
   const saveMessageIsError = /failed|cannot reach|error/i.test(saveMessage);
   const projectTakeawayBlocked = blockedDownstreamActions.includes("project_takeaway_candidate");
   const projectTakeawayAllowed = allowedDownstreamActions.includes("project_takeaway_candidate");
+  const watchOnlyBlocked = blockedDownstreamActions.includes("watch_only");
+  const watchOnlyAllowed = allowedDownstreamActions.includes("watch_only") && !watchOnlyBlocked;
   const projectTakeawayReviewBlocked = reviewPriority.label === "Do Not Act";
   const hasProjectTakeawayText = Boolean(cleanedProjectRelevance.trim() || cleanedStrategicTakeaway.trim());
   const unsupportedProjectClaimCount =
@@ -4581,6 +4655,7 @@ export default function SignalDetailClient() {
     setInsightGeneratingModel(selectedModel);
     setStatusMessage("");
     setStatusError("");
+    setWatchMatchPromptCount(0);
 
     try {
       const res = await adminFetch(`${API_BASE}/signals/generate-insight`, {
@@ -4641,10 +4716,18 @@ export default function SignalDetailClient() {
       setDecisionEditingUnlocked(false);
       setDecisionLockActive(false);
       invalidateSignalsListCache();
+      const watchMatchCount = data.watch_match_summary?.created_count || 0;
+      setWatchMatchPromptCount(watchMatchCount);
+      const watchMatchMessage = watchMatchCount > 0
+        ? ` Watch Matcher found ${watchMatchCount} related Watch candidate${watchMatchCount === 1 ? "" : "s"}. Open Watch Inbox to review.`
+        : data.watch_match_summary?.scanned_watch_count
+          ? " Watch Matcher checked active Watches and found no new candidate."
+          : "";
       setStatusMessage(
-        data.generation_mode === "fallback"
+        (data.generation_mode === "fallback"
           ? `Insight generation did not produce a strong enough model result, so a fallback template was saved instead. Requested: ${data.requested_provider || selectedModel}.${Array.isArray(data.policy_metadata?.notes) && data.policy_metadata.notes.length ? ` ${data.policy_metadata.notes[data.policy_metadata.notes.length - 1]}` : ""}`
-          : `Insight generated successfully via ${data.provider_used || selectedModel}${data.model_used ? ` (${data.model_used})` : ""}.`
+          : `Insight generated successfully via ${data.provider_used || selectedModel}${data.model_used ? ` (${data.model_used})` : ""}.`)
+        + watchMatchMessage
       );
     } catch (error: unknown) {
       console.error("Generate insight failed:", error);
@@ -5076,6 +5159,55 @@ Please generate a reflection draft that feels personal and specific, not generic
       setSaveMessage(getErrorMessage(error, "AI Polish failed."));
     } finally {
       setIsPolishing(false);
+    }
+  };
+
+  const handleStartProjectWatch = async () => {
+    if (!insight || watchCreating) return;
+    setWatchMessage("");
+    setWatchError("");
+
+    const signalId = String(insight.signal_id || insight.id || id || "").trim();
+    const missing = [
+      ["project", watchProjectId],
+      ["watch question", watchQuestion],
+      ["watch reason", watchReason],
+      ["success criteria", watchSuccessCriteria],
+      ["exit criteria", watchExitCriteria],
+      ["next review date", watchNextReviewAt],
+    ].filter(([, value]) => !String(value || "").trim());
+    if (!signalId || missing.length > 0) {
+      setWatchError(`Watch details required: ${missing.map(([label]) => label).join(", ")}.`);
+      return;
+    }
+
+    setWatchCreating(true);
+    try {
+      const response = await adminFetch(
+        `${API_BASE}/projects/${encodeURIComponent(watchProjectId)}/watch-items`,
+        {
+          method: "POST",
+          headers: buildJsonAdminHeaders(),
+          body: JSON.stringify({
+            origin_signal_id: signalId,
+            watch_question: watchQuestion,
+            watch_reason: watchReason,
+            success_criteria: watchSuccessCriteria,
+            exit_criteria: watchExitCriteria,
+            next_review_at: watchNextReviewAt,
+          }),
+        }
+      );
+      const data = (await response.json().catch(() => null)) as { item?: ProjectWatchItem; detail?: string; message?: string } | null;
+      if (!response.ok) {
+        throw new Error(data?.detail || data?.message || `Failed to create Project Watch (${response.status}).`);
+      }
+      setWatchCreatedItem(data?.item || null);
+      setWatchMessage("Project Watch created. The Signal status and verification state were not changed.");
+    } catch (error: unknown) {
+      setWatchError(getErrorMessage(error, "Failed to create Project Watch."));
+    } finally {
+      setWatchCreating(false);
     }
   };
 
@@ -5581,6 +5713,90 @@ Please generate a reflection draft that feels personal and specific, not generic
               lifecycleProbeError={lifecycleProbeError}
             />
 
+            <details
+              style={{
+                marginTop: "14px",
+                border: "1px solid var(--app-warning-border)",
+                borderRadius: "10px",
+                background: "var(--app-warning-bg)",
+                padding: "12px 14px",
+              }}
+            >
+              <summary style={{ cursor: "pointer", color: "var(--app-warning-fg)", fontWeight: 850 }}>
+                Start Project Watch
+              </summary>
+              <div style={{ marginTop: "10px", color: "var(--app-warning-fg)", fontSize: "13px", lineHeight: 1.6 }}>
+                Create an evidence follow-up task without changing this Signal&apos;s status or verification level.
+                Watch observations remain review context only and cannot unlock Project Takeaway or Action eligibility.
+              </div>
+              {watchOnlyAllowed ? (
+                <div style={{ display: "grid", gap: "10px", marginTop: "12px" }}>
+                  <label style={{ display: "grid", gap: "5px", color: "var(--app-text-strong)", fontSize: "12px", fontWeight: 800 }}>
+                    Project
+                    <select
+                      value={watchProjectId}
+                      onChange={(event) => setWatchProjectId(event.target.value)}
+                      style={detailInputStyle}
+                    >
+                      <option value="">Select project</option>
+                      {watchProjects.map((project) => (
+                        <option key={project.project_id} value={project.project_id}>
+                          {project.name || project.project_id}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label style={{ display: "grid", gap: "5px", color: "var(--app-text-strong)", fontSize: "12px", fontWeight: 800 }}>
+                    Watch question
+                    <input value={watchQuestion} onChange={(event) => setWatchQuestion(event.target.value)} style={detailInputStyle} placeholder="What should we learn over time?" />
+                  </label>
+                  <label style={{ display: "grid", gap: "5px", color: "var(--app-text-strong)", fontSize: "12px", fontWeight: 800 }}>
+                    Watch reason
+                    <textarea value={watchReason} onChange={(event) => setWatchReason(event.target.value)} style={{ ...detailInputStyle, minHeight: "68px", resize: "vertical" }} placeholder="Why is this worth attention but not stronger use yet?" />
+                  </label>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "10px" }}>
+                    <label style={{ display: "grid", gap: "5px", color: "var(--app-text-strong)", fontSize: "12px", fontWeight: 800 }}>
+                      Success criteria
+                      <textarea value={watchSuccessCriteria} onChange={(event) => setWatchSuccessCriteria(event.target.value)} style={{ ...detailInputStyle, minHeight: "68px", resize: "vertical" }} placeholder="What would count as meaningful support?" />
+                    </label>
+                    <label style={{ display: "grid", gap: "5px", color: "var(--app-text-strong)", fontSize: "12px", fontWeight: 800 }}>
+                      Exit criteria
+                      <textarea value={watchExitCriteria} onChange={(event) => setWatchExitCriteria(event.target.value)} style={{ ...detailInputStyle, minHeight: "68px", resize: "vertical" }} placeholder="When should observation stop?" />
+                    </label>
+                  </div>
+                  <label style={{ display: "grid", gap: "5px", color: "var(--app-text-strong)", fontSize: "12px", fontWeight: 800 }}>
+                    Next review date
+                    <input type="date" value={watchNextReviewAt} onChange={(event) => setWatchNextReviewAt(event.target.value)} style={detailInputStyle} />
+                  </label>
+                  <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
+                    <button
+                      type="button"
+                      onClick={() => void handleStartProjectWatch()}
+                      disabled={watchCreating || Boolean(watchCreatedItem)}
+                      style={{
+                        ...detailActionSecondaryStyle,
+                        ...(watchCreating || Boolean(watchCreatedItem) ? detailActionDisabledStyle : {}),
+                      }}
+                    >
+                      {watchCreating ? "Creating..." : watchCreatedItem ? "Watch Created" : "Start Project Watch"}
+                    </button>
+                    {watchCreatedItem ? (
+                      <Link href="/workspace/projects/review?view=watch" style={secondaryNavLinkStyle}>
+                        Open Watch Inbox
+                      </Link>
+                    ) : null}
+                  </div>
+                </div>
+              ) : (
+                <div style={{ marginTop: "10px", color: "var(--app-danger-fg)", fontSize: "13px", lineHeight: 1.5 }}>
+                  Watch creation is unavailable because the current verification policy does not explicitly allow `watch_only`
+                  {watchOnlyBlocked ? " and explicitly blocks it" : ""}.
+                </div>
+              )}
+              {watchMessage ? <div style={{ marginTop: "10px", color: "var(--app-success-fg)", fontSize: "13px" }}>{watchMessage}</div> : null}
+              {watchError ? <div style={{ marginTop: "10px", color: "var(--app-danger-fg)", fontSize: "13px" }}>{watchError}</div> : null}
+            </details>
+
             {statusMessage && (
               <div
                 style={{
@@ -5600,7 +5816,21 @@ Please generate a reflection draft that feels personal and specific, not generic
                   fontWeight: 600,
                 }}
               >
-                {statusMessage}
+                <div>{statusMessage}</div>
+                {watchMatchPromptCount > 0 ? (
+                  <Link
+                    href="/workspace/projects/review?view=watch"
+                    style={{
+                      display: "inline-flex",
+                      marginTop: "8px",
+                      color: "inherit",
+                      textDecoration: "underline",
+                      textUnderlineOffset: "3px",
+                    }}
+                  >
+                    Open Watch Inbox · Review {watchMatchPromptCount} new match{watchMatchPromptCount === 1 ? "" : "es"}
+                  </Link>
+                ) : null}
               </div>
             )}
 
@@ -9244,6 +9474,18 @@ const detailActionLinkStyle: React.CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
   textDecoration: "none",
+};
+
+const detailInputStyle: React.CSSProperties = {
+  width: "100%",
+  boxSizing: "border-box",
+  border: "1px solid var(--app-input-border)",
+  borderRadius: "8px",
+  background: "var(--app-input-bg)",
+  color: "var(--app-input-fg)",
+  padding: "9px 10px",
+  fontSize: "13px",
+  fontFamily: "Arial",
 };
 
 const inlineReviewLinkStyle: React.CSSProperties = {

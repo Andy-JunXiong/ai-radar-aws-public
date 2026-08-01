@@ -4,7 +4,194 @@ import hashlib
 import json
 from typing import Any
 
+from app.services.intelligence_lineage_validator import validate_intelligence_lineage
 from app.services.metrics_event_service import record_verification_event
+
+
+VERIFICATION_STATUSES = frozenset(
+    {
+        "needs_human_review",
+        "not_verifiable",
+        "contradicted",
+        "unsupported",
+        "weakly_supported",
+        "partially_verified",
+        "verified",
+        "verified_with_limitations",
+        "weak_evidence",
+    }
+)
+
+EVIDENCE_LEVELS = frozenset({"insufficient", "thin", "sufficient", "strong"})
+
+CLAIM_SUPPORT_LEVELS = frozenset(
+    {
+        "unsupported",
+        "inferred",
+        "partially_supported",
+        "directly_supported",
+        "contradicted",
+    }
+)
+
+INFERENCE_DISTANCES = frozenset({"direct", "near", "medium", "far"})
+
+DOWNSTREAM_ACTIONS = frozenset(
+    {
+        "reflection_draft",
+        "strong_recommendation",
+        "observation_only",
+        "decision_card",
+        "project_takeaway_candidate",
+        "low_risk_action_candidate",
+        "weak_insight",
+        "watch_only",
+        "normal_insight",
+        "needs_human_review",
+    }
+)
+
+EVIDENCE_PACK_REQUIRED_STATUSES = frozenset(
+    {
+        "verified",
+        "verified_with_limitations",
+        "partially_verified",
+    }
+)
+
+
+class VerificationMetadataContractError(ValueError):
+    def __init__(self, code: str, message: str):
+        self.code = code
+        super().__init__(f"{code}: {message}")
+
+
+def _validate_allowed_value(value: Any, allowed: frozenset[str], *, field: str, code: str) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized not in allowed:
+        raise VerificationMetadataContractError(
+            code,
+            f"{field} must be one of: {', '.join(sorted(allowed))}.",
+        )
+    return normalized
+
+
+def validate_new_verified_insight_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(metadata, dict):
+        raise VerificationMetadataContractError(
+            "invalid_verification_metadata",
+            "verification metadata must be a JSON object.",
+        )
+
+    verification_status = _validate_allowed_value(
+        metadata.get("verification_status"),
+        VERIFICATION_STATUSES,
+        field="verification_status",
+        code="invalid_verification_status",
+    )
+
+    verified_insight = metadata.get("verified_insight")
+    if not isinstance(verified_insight, dict):
+        raise VerificationMetadataContractError(
+            "missing_verified_insight",
+            "verified_insight must be present on newly built metadata.",
+        )
+
+    evidence = verified_insight.get("evidence")
+    if not isinstance(evidence, dict):
+        raise VerificationMetadataContractError(
+            "missing_verified_insight_evidence",
+            "verified_insight.evidence must be present.",
+        )
+    evidence_level = _validate_allowed_value(
+        metadata.get("evidence_level") or evidence.get("level"),
+        EVIDENCE_LEVELS,
+        field="evidence_level",
+        code="invalid_evidence_level",
+    )
+
+    nested_status = str(verified_insight.get("status") or "").strip().lower()
+    if nested_status != verification_status:
+        raise VerificationMetadataContractError(
+            "verification_status_mismatch",
+            "flat and nested verification status values must match.",
+        )
+    nested_evidence_level = str(evidence.get("level") or "").strip().lower()
+    if nested_evidence_level != evidence_level:
+        raise VerificationMetadataContractError(
+            "evidence_level_mismatch",
+            "flat and nested evidence level values must match.",
+        )
+
+    allowed_actions = [str(action).strip() for action in metadata.get("allowed_downstream_actions") or []]
+    blocked_actions = [str(action).strip() for action in metadata.get("blocked_downstream_actions") or []]
+    for field, actions in (
+        ("allowed_downstream_actions", allowed_actions),
+        ("blocked_downstream_actions", blocked_actions),
+    ):
+        for action in actions:
+            _validate_allowed_value(
+                action,
+                DOWNSTREAM_ACTIONS,
+                field=field,
+                code="invalid_downstream_action",
+            )
+
+    conflicts = sorted(set(allowed_actions).intersection(blocked_actions))
+    if conflicts:
+        raise VerificationMetadataContractError(
+            "conflicting_downstream_actions",
+            f"actions cannot be both allowed and blocked: {', '.join(conflicts)}.",
+        )
+
+    nested_action_policy = verified_insight.get("action_policy")
+    if not isinstance(nested_action_policy, dict):
+        raise VerificationMetadataContractError(
+            "missing_action_policy",
+            "verified_insight.action_policy must be present.",
+        )
+    if nested_action_policy.get("allowed") != allowed_actions or nested_action_policy.get("blocked") != blocked_actions:
+        raise VerificationMetadataContractError(
+            "action_policy_mismatch",
+            "flat and nested action policy values must match.",
+        )
+
+    claims = metadata.get("claim_results")
+    if claims is not None:
+        if not isinstance(claims, list):
+            raise VerificationMetadataContractError(
+                "invalid_claim_results",
+                "claim_results must be a list when present.",
+            )
+        for index, claim in enumerate(claims):
+            if not isinstance(claim, dict):
+                raise VerificationMetadataContractError(
+                    "invalid_claim_result",
+                    f"claim_results[{index}] must be an object.",
+                )
+            _validate_allowed_value(
+                claim.get("support_level"),
+                CLAIM_SUPPORT_LEVELS,
+                field=f"claim_results[{index}].support_level",
+                code="invalid_claim_support_level",
+            )
+            if claim.get("inference_distance") not in {None, ""}:
+                _validate_allowed_value(
+                    claim.get("inference_distance"),
+                    INFERENCE_DISTANCES,
+                    field=f"claim_results[{index}].inference_distance",
+                    code="invalid_inference_distance",
+                )
+
+    if verification_status in EVIDENCE_PACK_REQUIRED_STATUSES:
+        evidence_pack_id = str(metadata.get("evidence_pack_id") or evidence.get("pack_id") or "").strip()
+        if not evidence_pack_id:
+            raise VerificationMetadataContractError(
+                "missing_evidence_pack_id",
+                f"{verification_status} metadata requires an evidence_pack_id.",
+            )
+
+    return metadata
 
 
 def _as_bool(value: Any) -> bool:
@@ -259,6 +446,7 @@ def build_verified_insight_metadata(
     generation_mode: str,
     claim_results: list[dict[str, Any]] | None = None,
     evidence_pack_id: str | None = None,
+    evidence_pack: dict[str, Any] | None = None,
     produced_by_model: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     evidence_level = str(evidence_quality.get("level") or "thin").lower()
@@ -380,6 +568,13 @@ def build_verified_insight_metadata(
         downgrade_reason=downgrade_reason,
         limitations=list(dict.fromkeys(limitations)),
         produced_by_model=produced_by_model,
+    )
+
+    validate_new_verified_insight_metadata(result)
+    validate_intelligence_lineage(
+        evidence_pack_id=evidence_pack_id,
+        evidence_pack=evidence_pack,
+        claim_results=claim_results,
     )
 
     _record_verified_insight_metric(

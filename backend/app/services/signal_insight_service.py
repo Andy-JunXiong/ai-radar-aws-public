@@ -226,6 +226,7 @@ def _build_policy_metadata(
         generation_mode=generation_mode,
         claim_results=claim_results,
         evidence_pack_id=evidence_pack.get("source_signal_id"),
+        evidence_pack=evidence_pack,
         produced_by_model=produced_by_model,
     )
     return {
@@ -294,6 +295,7 @@ def _build_claim_level_verification(
         generation_mode=generation_mode,
         claim_results=claim_results,
         evidence_pack_id=evidence_pack.get("source_signal_id"),
+        evidence_pack=evidence_pack,
         produced_by_model=produced_by_model,
     )
     return {

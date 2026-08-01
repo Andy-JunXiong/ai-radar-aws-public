@@ -93,6 +93,12 @@ Key invariants:
 
 Project Takeaways support Confirm, Reject, Dismiss, Watch, and Action outcomes. ReviewRecords, CalibrationEvents, follow-up observations, and trajectory events make it possible to examine how judgment changed over time.
 
+Project Watch adds a separate evidence-follow-up path from eligible Signals.
+After Insight generation, an explainable deterministic matcher can surface
+related Signals for human review. Matches are `review_candidate_only`, and
+accepted observations remain `review_context_only`; neither changes
+verification status nor unlocks Project Takeaway or Action eligibility.
+
 ## Architecture at a Glance
 
 ```mermaid

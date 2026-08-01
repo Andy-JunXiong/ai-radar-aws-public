@@ -53,6 +53,8 @@ Already usable:
   explicit Signal Detail handoff from a confirmed Final Takeaway into Review
   Inbox while preserving Project Takeaway verification and override gates
 - ReviewRecord / CalibrationEvent / Trajectory event foundations
+- Project Watch evidence follow-ups plus deterministic post-Insight related-Signal
+  matching for human review
 - model routing and execution policy foundations
 - internal prompt / skill registry discipline
 - governance and evaluation scaffolds for invariants, bounded edits, edit
@@ -87,6 +89,8 @@ Focus areas:
   preserving blocked low-risk Action behavior
 - confirmed / rejected / dismissed / watch / action review outcomes
 - Watch follow-up observations
+- explainable `review_candidate_only` related-Signal matches after Generate
+  Insight, with explicit human acceptance before Observation creation
 - Action completion with outcome metadata
 - ReviewRecord detail pages
 - CalibrationEvent and trajectory integration
@@ -107,6 +111,8 @@ Important boundary:
 - Empty verification metadata must not create a clean `verified_insight` candidate.
 - Human override must remain explicit, auditable, and exceptional.
 - Rejected learning is caution context, not factual evidence or claim support.
+- Watch matches and accepted observations remain review context; they do not
+  upgrade verification or grant Project Takeaway / Action eligibility.
 
 Expected result:
 

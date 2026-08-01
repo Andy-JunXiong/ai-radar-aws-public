@@ -706,6 +706,31 @@ class ProjectTakeawayReviewFlowTests(unittest.TestCase):
                 "answer": "unclear",
                 "summary": "The packet is underdetermined.",
                 "boundary": "LLM advisory only.",
+                "reasoning_assessment": {
+                    "assessment_id": "ra_test",
+                    "schema_version": 1,
+                    "conclusion_ref": "vi_test",
+                    "conclusion_text": "Candidate takeaway",
+                    "load_bearing_claim_ids": [],
+                    "warrant": {
+                        "type": "other",
+                        "status": "missing",
+                        "text": "",
+                    },
+                    "counter_conclusion": {
+                        "status": "not_attemptable",
+                        "text": "",
+                    },
+                    "verdict": "needs_human_judgment",
+                    "effect": "reviewer_advisory_only",
+                    "assessment_method": "model_assisted",
+                    "limitations": ["missing_warrant", "missing_load_bearing_claim_ids"],
+                    "reviewer_next_step": "Provide claim anchors and a warrant.",
+                    "produced_by_model": {
+                        "provider": "openai",
+                        "model_id": "gpt-test",
+                    },
+                },
             }
 
             result = project_intelligence_service.save_reasoning_counter_check_draft(
@@ -716,6 +741,7 @@ class ProjectTakeawayReviewFlowTests(unittest.TestCase):
 
             self.assertEqual(result["reasoning_counter_check_draft"], draft)
             self.assertEqual(result["reasoning_counter_check_effect"], "reviewer_advisory_only")
+            self.assertEqual(result["reasoning_assessment"], draft["reasoning_assessment"])
             self.assertIn("reasoning_counter_check_saved_at", result)
             self.assertEqual(
                 result["verification_metadata"],
@@ -728,7 +754,9 @@ class ProjectTakeawayReviewFlowTests(unittest.TestCase):
 
             saved = project_intelligence_service.load_project_improvements("ai_radar")
             self.assertEqual(saved["items"][0]["reasoning_counter_check_draft"], draft)
+            self.assertEqual(saved["items"][0]["reasoning_assessment"], draft["reasoning_assessment"])
             self.assertNotIn("reasoning_counter_check_draft", saved["items"][0]["verification_metadata"])
+            self.assertNotIn("reasoning_assessment", saved["items"][0]["verification_metadata"])
 
     def test_project_review_record_detail_route_returns_record_by_id(self):
         with workspace_temp_dir() as temp_dir, patch.object(

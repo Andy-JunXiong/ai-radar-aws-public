@@ -33,6 +33,7 @@ from app.services.subscription_settings_service import (
     load_subscription_settings,
 )
 from app.routes.workspace import SaveReflectionRequest, save_reflection_to_file
+from app.project_registry import list_active_projects
 from app.services.reflection_service import find_related_reflections_for_signal
 from app.services.project_intelligence_service import add_signal_to_project_improvements
 from app.services.project_calibration_event_service import list_project_calibration_events
@@ -65,6 +66,7 @@ from app.services.signal_lifecycle_event_service import (
 )
 from app.services.signal_lifecycle_probe_service import build_signal_lifecycle_probe
 from app.services.signal_near_duplicate_service import build_signal_near_duplicate_report
+from app.services.project_watch_service import match_signal_to_active_project_watches
 
 router = APIRouter()
 
@@ -189,6 +191,27 @@ def _soft_record_generate_insight_lifecycle_events(
         append_signal_lifecycle_events(signal_id, events)
     except Exception as exc:
         print(f"[WARN] signal lifecycle soft recording failed for {signal_id}: {exc}")
+
+
+def _soft_match_generated_signal_to_watches(signal: dict) -> dict:
+    signal_id = str(signal.get("signal_id") or signal.get("id") or "").strip()
+    try:
+        project_ids = [
+            str(project.get("project_id") or "").strip()
+            for project in list_active_projects()
+            if str(project.get("project_id") or "").strip()
+        ]
+        return match_signal_to_active_project_watches(signal, project_ids=project_ids)
+    except Exception as exc:
+        print(f"[WARN] Watch Matcher soft failure for {signal_id}: {exc}")
+        return {
+            "signal_id": signal_id,
+            "scanned_watch_count": 0,
+            "created_count": 0,
+            "existing_count": 0,
+            "matches": [],
+            "error": "watch_matcher_unavailable",
+        }
 
 
 def _soft_record_signal_completion_lifecycle_events(
@@ -1391,6 +1414,7 @@ def generate_insight_for_signal(payload: GenerateInsightRequest, request: Reques
             fingerprint_changed=preexisting_fingerprint != refreshed_fingerprint,
             event_time=session_data.get("updated_at"),
         )
+        watch_match_summary = _soft_match_generated_signal_to_watches(normalized_refreshed)
         debug_file_name = write_signal_insight_debug_record(
             {
                 "generated_at": utc_now_iso(),
@@ -1457,6 +1481,7 @@ def generate_insight_for_signal(payload: GenerateInsightRequest, request: Reques
             or (((session_data.get("policy_metadata") or {}).get("verification") or {}).get("verified_insight_id")),
             "evidence_pack": session_data.get("evidence_pack"),
             "execution": (session_data.get("policy_metadata") or {}).get("execution"),
+            "watch_match_summary": watch_match_summary,
             "updated_keys": [
                 "why_it_matters",
                 "relevance_to_projects",
@@ -1531,6 +1556,14 @@ def generate_insight_for_signal(payload: GenerateInsightRequest, request: Reques
         fingerprint_changed=preexisting_fingerprint != stored_fingerprint,
         event_time=utc_now_iso(),
     )
+    watch_match_summary = _soft_match_generated_signal_to_watches(
+        {
+            **normalized,
+            **normalized_refreshed,
+            **insight,
+            "signal_id": signal_id,
+        }
+    )
     debug_file_name = write_signal_insight_debug_record(
         {
             "generated_at": utc_now_iso(),
@@ -1582,6 +1615,7 @@ def generate_insight_for_signal(payload: GenerateInsightRequest, request: Reques
         or ((insight.get("verification") or {}).get("verified_insight_id")),
         "evidence_pack": (refreshed or result).get("evidence_pack") or insight.get("evidence_pack"),
         "execution": (insight.get("policy_metadata") or {}).get("execution"),
+        "watch_match_summary": watch_match_summary,
         "updated_keys": result.get("updated_keys", []),
     }
 

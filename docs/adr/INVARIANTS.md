@@ -95,6 +95,33 @@ Rules:
 8. Local test, fixture, demo, or legacy records must not be treated as real
    intelligence-flow evidence without explicit classification.
 
+## Project Watch Evidence-Followup Boundary
+
+Governing ADR:
+
+- ADR-0002: Hypothesis Monitoring Boundary.
+
+Rules:
+
+1. `evidence_followup` is a human-created project follow-up task;
+   `hypothesis_monitor` is a separate, deferred active-monitoring category.
+2. Evidence-followup Observations are `review_context_only` regardless of their
+   quantity or age.
+3. Watch Observations must not change verification status, count as claim
+   support, create Project Takeaway or Action eligibility, or bypass
+   `blocked_downstream_actions`.
+4. Resolving a Watch stops observation. It does not verify or disprove the
+   underlying claim and does not grant downstream eligibility.
+5. A deterministic matcher may run after Generate Insight and create an
+   explainable `review_candidate_only` item for an active Watch. The candidate
+   is attention context, not an Observation or evidence.
+6. A human must explicitly accept a related-Signal candidate, with a reviewer
+   note, before it becomes a `review_context_only` Observation. Ignore and Not
+   Related create no Observation.
+7. Scheduled monitoring, raw-ingestion triggers, LLM or embedding matching,
+   and proactive external notification require a separate active-monitoring
+   decision.
+
 ## Rejected Learning Boundary
 
 Rejected or dismissed review history can be useful caution context. It is not
@@ -231,6 +258,7 @@ Rules:
 | Slice touches | Read first |
 |---|---|
 | Hypothesis watches or strategic monitoring | ADR-0002 |
+| Project evidence-followup Watches or Watch Observations | ADR-0002, then this invariant index |
 | Operator guidance, next-action advice, fallback guidance | ADR-0006 |
 | Signal lifecycle, trajectory, status mutation, hard enforcement | ADR-0008 |
 | Model provenance, attribution analytics, model labels | ADR-0009 |
