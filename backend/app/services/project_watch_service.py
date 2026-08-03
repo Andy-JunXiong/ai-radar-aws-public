@@ -27,20 +27,51 @@ MATCH_STOP_WORDS = frozenset(
     {
         "about",
         "after",
+        "also",
+        "and",
+        "are",
+        "before",
+        "being",
+        "but",
+        "can",
+        "context",
+        "could",
+        "does",
+        "doing",
+        "for",
+        "from",
+        "had",
+        "has",
+        "have",
+        "insight",
+        "insights",
+        "into",
+        "its",
+        "launch",
+        "more",
+        "new",
+        "our",
+        "radar",
+        "roadmap",
+        "small",
+        "suite",
+        "than",
+        "the",
+        "then",
+        "their",
+        "this",
+        "was",
+        "were",
+        "will",
+        "with",
+        "would",
+        "your",
         "agent",
         "agents",
-        "also",
         "because",
-        "before",
-        "could",
         "evidence",
-        "from",
-        "have",
-        "into",
-        "more",
         "model",
         "models",
-        "new",
         "observation",
         "pattern",
         "platform",
@@ -54,8 +85,6 @@ MATCH_STOP_WORDS = frozenset(
         "support",
         "supports",
         "that",
-        "their",
-        "this",
         "tool",
         "tools",
         "watch",
@@ -63,10 +92,25 @@ MATCH_STOP_WORDS = frozenset(
         "when",
         "where",
         "which",
-        "with",
-        "would",
     }
 )
+
+MATCH_TOKEN_ALIASES = {
+    "benchmarks": "benchmark",
+    "evals": "eval",
+    "evaluating": "eval",
+    "evaluation": "eval",
+    "evaluations": "eval",
+    "evaluator": "eval",
+    "evaluators": "eval",
+    "harnesses": "harness",
+    "prompts": "prompt",
+    "workflows": "workflow",
+}
+
+# These terms are meaningful as corroboration but too broad to qualify a title
+# by themselves. A stronger origin-title term must also be present.
+MATCH_WEAK_TITLE_ANCHORS = frozenset({"prompt"})
 
 WATCH_RESOLUTION_BASES = frozenset(
     {
@@ -121,14 +165,17 @@ def _flatten_text(value: object) -> str:
 def _meaningful_tokens(value: object) -> set[str]:
     text = _flatten_text(value).lower()
     latin_tokens = {
-        token
-        for token in re.findall(r"[a-z0-9][a-z0-9._+-]{2,}", text)
+        MATCH_TOKEN_ALIASES.get(token, token)
+        for token in re.findall(r"[a-z0-9]{3,}", text)
         if token not in MATCH_STOP_WORDS and not token.isdigit()
     }
     return latin_tokens
 
 
 def _signal_match_text(signal: dict[str, Any]) -> str:
+    # Match only on source-side metadata. Generated interpretation fields such
+    # as synthesized_insight or relevance_to_projects can repeat Watch wording
+    # and would make the matcher validate its own prior analysis.
     fields = (
         "title",
         "signal_title",
@@ -137,10 +184,6 @@ def _signal_match_text(signal: dict[str, Any]) -> str:
         "topic",
         "topics",
         "tags",
-        "why_it_matters",
-        "relevance_to_projects",
-        "synthesized_insight",
-        "strategy",
         "repo",
         "repository",
         "product",
@@ -176,6 +219,19 @@ def _build_match_reasons(watch: dict[str, Any], signal: dict[str, Any]) -> list[
     if _safe_text(watch.get("project_id")) in _signal_project_ids(signal):
         reasons.append({"code": "same_project_link", "label": "Same project link", "matched_terms": []})
 
+    title_anchor_terms = sorted(
+        (signal_title_tokens & _meaningful_tokens(watch.get("origin_signal_title")))
+        - MATCH_WEAK_TITLE_ANCHORS
+    )
+    if title_anchor_terms:
+        reasons.append(
+            {
+                "code": "title_anchor_terms",
+                "label": "Signal title matches origin terms",
+                "matched_terms": title_anchor_terms[:6],
+            }
+        )
+
     origin_terms = sorted(_meaningful_tokens(watch.get("origin_signal_title")) & (signal_title_tokens | signal_text_tokens))
     if origin_terms:
         reasons.append(
@@ -192,7 +248,7 @@ def _build_match_reasons(watch: dict[str, Any], signal: dict[str, Any]) -> list[
         )
         & signal_text_tokens
     )
-    if len(watch_terms) >= 2:
+    if watch_terms:
         reasons.append(
             {
                 "code": "shared_watch_terms",
@@ -202,7 +258,7 @@ def _build_match_reasons(watch: dict[str, Any], signal: dict[str, Any]) -> list[
         )
 
     success_terms = sorted(_meaningful_tokens(watch.get("success_criteria")) & signal_text_tokens)
-    if len(success_terms) >= 2:
+    if success_terms:
         reasons.append(
             {
                 "code": "success_criteria_terms",
@@ -212,7 +268,7 @@ def _build_match_reasons(watch: dict[str, Any], signal: dict[str, Any]) -> list[
         )
 
     exit_terms = sorted(_meaningful_tokens(watch.get("exit_criteria")) & signal_text_tokens)
-    if len(exit_terms) >= 2:
+    if exit_terms:
         reasons.append(
             {
                 "code": "exit_criteria_terms",
@@ -225,13 +281,13 @@ def _build_match_reasons(watch: dict[str, Any], signal: dict[str, Any]) -> list[
 
 def _is_match_candidate(reasons: list[dict[str, Any]]) -> bool:
     reason_codes = {_safe_text(reason.get("code")) for reason in reasons}
-    if len(reason_codes) < 2:
-        return False
-    return bool(
-        "same_project_link" in reason_codes
-        or "shared_origin_terms" in reason_codes
-        or {"shared_watch_terms", "success_criteria_terms"}.issubset(reason_codes)
-    )
+    semantic_reason_codes = {
+        "shared_origin_terms",
+        "shared_watch_terms",
+        "success_criteria_terms",
+        "exit_criteria_terms",
+    }
+    return "title_anchor_terms" in reason_codes and bool(reason_codes & semantic_reason_codes)
 
 
 def _normalize_payload(project_id: str, payload: object) -> dict[str, Any]:

@@ -448,11 +448,20 @@ const cases = [
   {
     name: "project review explains automatic Watch Matcher and human acceptance boundary",
     pathname: "/workspace/projects/review?view=watch",
-    pageText: `${projectReviewInboxText}\nProject Watch Attention\nNew Related Signals\nAccept as Observation\nNot Related`,
+    pageText: `${projectReviewInboxText}\nProject Watch Attention\nNew Related Signals\nMatch Reasons\nAccept as Observation\nNot Related`,
     question: "How does Watch Matcher handle a related Signal?",
     language: "en",
-    mustInclude: ["automatically after Generate Insight", "review_candidate_only", "not evidence", "review_context_only", "write no Observation"],
+    mustInclude: ["automatically after Generate Insight", "Match Reasons", "origin-title anchor", "same-project links", "not sufficient", "review_candidate_only", "not evidence", "review_context_only", "write no Observation"],
     mustNotInclude: ["automatically verifies", "creates an Action", "unlocks Action"],
+  },
+  {
+    name: "project review explains visible Match Reasons without generic fallback",
+    pathname: "/workspace/projects/review?view=watch",
+    pageText: `${projectReviewInboxText}\nProject Watch Attention\nNew Related Signals\nMatch Reasons`,
+    question: "What do Match Reasons mean?",
+    language: "en",
+    mustInclude: ["Match Reasons", "origin-title anchor", "source-side Signal fields", "same-project links", "not sufficient", "review_candidate_only"],
+    mustNotInclude: ["Signal workflow overview", "Manual Upload", "automatically verifies"],
   },
   {
     name: "project review explains Resolve Watch is not verification",

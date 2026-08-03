@@ -31,6 +31,7 @@ function wantsNextStep(question: string) {
     "resolve watch",
     "add observation",
     "watch matcher",
+    "match reason",
     "related signal",
     "new matches",
     "accept as observation",
@@ -633,6 +634,7 @@ export function buildStateAwareGuidanceResponse(
   const resolveProjectWatchQuestion = hasAny(normalize(question), ["resolve watch", "close project watch"]);
   const relatedWatchMatchQuestion = hasAny(normalize(question), [
     "watch matcher",
+    "match reason",
     "related signal",
     "new matches",
     "accept as observation",
@@ -898,12 +900,12 @@ export function buildStateAwareGuidanceResponse(
         language,
         [
           "Watch Matcher runs automatically after Generate Insight succeeds and places deterministic matches under New Related Signals for active Watches.",
-          "Reasons come from explainable overlap with project links, the origin Signal, the Watch question, and success or exit criteria. The result is review_candidate_only, not evidence.",
+          "Match Reasons require a meaningful origin-title anchor plus overlap in source-side Signal fields; same-project links or generic terms alone are not sufficient. The result is review_candidate_only, not evidence.",
           `${suggestedButton(language, "Review Signal")} Inspect the Signal first. Accept as Observation requires a reviewer note and only writes a review_context_only Observation; Ignore and Not Related write no Observation.`,
         ],
         [
           "Watch Matcher runs automatically after Generate Insight succeeds and places deterministic matches under New Related Signals for active Watches.",
-          "Reasons come from explainable overlap with project links, the origin Signal, the Watch question, and success or exit criteria. The result is review_candidate_only, not evidence.",
+          "Match Reasons require a meaningful origin-title anchor plus overlap in source-side Signal fields; same-project links or generic terms alone are not sufficient. The result is review_candidate_only, not evidence.",
           `${suggestedButton(language, "Review Signal")} Inspect the Signal first. Accept as Observation requires a reviewer note and only writes a review_context_only Observation; Ignore and Not Related write no Observation.`,
         ]
       );

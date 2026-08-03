@@ -1,6 +1,9 @@
 import sys
 import shutil
+import threading
+import time
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
 from pathlib import Path
 
@@ -68,6 +71,7 @@ class AdminAuthRouteTests(unittest.TestCase):
         self.assertTrue(auth_service.is_valid_admin_token(new_login_result["token"]))
 
     def test_load_prefers_s3_payload_and_refreshes_local_cache(self):
+        now = auth_service._now()
         auth_service.AUTH_FILE.write_text(
             '{"username":"local","password_hash":"local-hash","salt":"local-salt","tokens":[]}',
             encoding="utf-8",
@@ -76,7 +80,13 @@ class AdminAuthRouteTests(unittest.TestCase):
             "username": "s3-admin",
             "password_hash": "s3-hash",
             "salt": "s3-salt",
-            "tokens": ["s3-token"],
+            "tokens": [
+                {
+                    "token": "s3-token",
+                    "issued_at": now,
+                    "last_seen_at": now,
+                }
+            ],
         }
 
         payload = auth_service.load_admin_auth_payload()
@@ -94,6 +104,77 @@ class AdminAuthRouteTests(unittest.TestCase):
         self.assertTrue(auth_service.AUTH_FILE.exists())
         self.assertEqual(written_payloads[-1]["username"], "admin")
         self.assertEqual(written_payloads[-1]["tokens"], [])
+
+    def test_concurrent_token_validation_serializes_auth_file_writes(self):
+        auth_service.create_admin_account("admin", "password")
+        login_result = auth_login(AdminLoginRequest(username="admin", password="password"))
+        token = login_result["token"]
+        original_write = auth_service._write_json_file_atomic
+        probe_lock = threading.Lock()
+        active_writes = 0
+        max_active_writes = 0
+
+        def tracked_write(path, payload):
+            nonlocal active_writes, max_active_writes
+            with probe_lock:
+                active_writes += 1
+                max_active_writes = max(max_active_writes, active_writes)
+            try:
+                time.sleep(0.01)
+                original_write(path, payload)
+            finally:
+                with probe_lock:
+                    active_writes -= 1
+
+        with patch.object(auth_service, "_write_json_file_atomic", side_effect=tracked_write):
+            with ThreadPoolExecutor(max_workers=8) as executor:
+                results = list(executor.map(auth_service.is_valid_admin_token, [token] * 16))
+
+        self.assertTrue(all(results))
+        self.assertEqual(max_active_writes, 1)
+        self.assertTrue(auth_service.is_valid_admin_token(token))
+
+    def test_auth_file_replace_retries_transient_windows_permission_error(self):
+        class FlakyTemporaryPath:
+            def __init__(self):
+                self.attempts = 0
+
+            def replace(self, path):
+                self.attempts += 1
+                if self.attempts < 3:
+                    raise PermissionError(5, "Access is denied", str(path))
+
+        temporary_path = FlakyTemporaryPath()
+        target_path = self.temp_dir / "admin_auth.json"
+
+        with patch.object(auth_service.time, "sleep") as sleep:
+            auth_service._replace_auth_file_with_retry(temporary_path, target_path)
+
+        self.assertEqual(temporary_path.attempts, 3)
+        self.assertEqual(
+            [call.args[0] for call in sleep.call_args_list],
+            [
+                auth_service.AUTH_FILE_REPLACE_RETRY_SECONDS,
+                auth_service.AUTH_FILE_REPLACE_RETRY_SECONDS * 2,
+            ],
+        )
+
+    def test_auth_file_replace_raises_after_retry_limit(self):
+        class LockedTemporaryPath:
+            def __init__(self):
+                self.attempts = 0
+
+            def replace(self, path):
+                self.attempts += 1
+                raise PermissionError(5, "Access is denied", str(path))
+
+        temporary_path = LockedTemporaryPath()
+        target_path = self.temp_dir / "admin_auth.json"
+
+        with patch.object(auth_service.time, "sleep"), self.assertRaises(PermissionError):
+            auth_service._replace_auth_file_with_retry(temporary_path, target_path)
+
+        self.assertEqual(temporary_path.attempts, auth_service.AUTH_FILE_REPLACE_MAX_ATTEMPTS)
 
     def test_s3_bucket_defaults_to_shared_ai_radar_bucket_without_env(self):
         with patch.dict(auth_service.os.environ, {}, clear=True):

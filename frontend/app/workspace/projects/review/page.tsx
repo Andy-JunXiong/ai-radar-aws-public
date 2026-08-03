@@ -4046,11 +4046,11 @@ export default function ProjectTakeawayReviewPage() {
           </div>
           <div style={projectLearningProfileBoundaryStyle}>
             <div>
-              <span style={summaryLabelStyle}>Evidence Boundary</span>
+              <span style={summaryLabelStyle}>Evidence Boundary</span>{" "}
               <strong>{learningBoundary}</strong>
             </div>
             <div>
-              <span style={summaryLabelStyle}>Next Focus</span>
+              <span style={summaryLabelStyle}>Next Focus</span>{" "}
               <strong>{learningProfilePosture.focus || "Keep using Review Inbox decisions to build project learning memory."}</strong>
             </div>
           </div>
@@ -4340,13 +4340,18 @@ export default function ProjectTakeawayReviewPage() {
                                 <strong style={{ color: "var(--app-text-strong)" }}>{candidate.signal_title || signalId}</strong>
                                 {candidate.signal_summary ? <div style={{ color: "var(--app-text-muted)", fontSize: "12px", lineHeight: 1.5, marginTop: "4px" }}>{candidate.signal_summary}</div> : null}
                               </div>
-                              <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-                                {(candidate.match_reasons || []).map((reason) => (
-                                  <span key={reason.code} style={summaryMiniChipStyle} title={(reason.matched_terms || []).join(", ")}>
-                                    {reason.label || reason.code}
-                                    {(reason.matched_terms || []).length > 0 ? `: ${(reason.matched_terms || []).slice(0, 3).join(", ")}` : ""}
-                                  </span>
-                                ))}
+                              <div style={{ display: "grid", gap: "6px" }}>
+                                <div style={{ color: "var(--app-text-muted)", fontSize: "11px", fontWeight: 850, textTransform: "uppercase" }}>
+                                  Match Reasons
+                                </div>
+                                <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                                  {(candidate.match_reasons || []).map((reason) => (
+                                    <span key={reason.code} style={summaryMiniChipStyle} title={(reason.matched_terms || []).join(", ")}>
+                                      {reason.label || reason.code}
+                                      {(reason.matched_terms || []).length > 0 ? `: ${(reason.matched_terms || []).slice(0, 3).join(", ")}` : ""}
+                                    </span>
+                                  ))}
+                                </div>
                               </div>
                               <textarea
                                 value={projectWatchMatchNoteById[noteKey] || ""}

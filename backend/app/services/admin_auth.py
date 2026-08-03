@@ -4,6 +4,7 @@ import secrets
 import os
 import time
 from pathlib import Path
+from threading import RLock
 from typing import Any
 
 import boto3
@@ -31,6 +32,9 @@ AUTH_DIR = _resolve_auth_dir()
 AUTH_FILE = AUTH_DIR / "admin_auth.json"
 ACTIVE_TOKENS: set[str] = set()
 ADMIN_SESSION_IDLE_TIMEOUT_SECONDS = 60 * 60
+_AUTH_FILE_WRITE_LOCK = RLock()
+AUTH_FILE_REPLACE_MAX_ATTEMPTS = 5
+AUTH_FILE_REPLACE_RETRY_SECONDS = 0.01
 
 
 def _ensure_auth_dir() -> None:
@@ -190,6 +194,17 @@ def _write_s3_payload(payload: dict[str, Any]) -> None:
     )
 
 
+def _replace_auth_file_with_retry(tmp_path: Path, path: Path) -> None:
+    for attempt in range(AUTH_FILE_REPLACE_MAX_ATTEMPTS):
+        try:
+            tmp_path.replace(path)
+            return
+        except PermissionError:
+            if attempt + 1 >= AUTH_FILE_REPLACE_MAX_ATTEMPTS:
+                raise
+            time.sleep(AUTH_FILE_REPLACE_RETRY_SECONDS * (attempt + 1))
+
+
 def _write_json_file_atomic(path: Path, payload: dict[str, Any]) -> None:
     _ensure_auth_dir()
     tmp_path = path.with_name(f".{path.name}.{os.getpid()}.{time.time_ns()}.tmp")
@@ -197,7 +212,14 @@ def _write_json_file_atomic(path: Path, payload: dict[str, Any]) -> None:
         json.dumps(payload, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
-    tmp_path.replace(path)
+    try:
+        _replace_auth_file_with_retry(tmp_path, path)
+    finally:
+        if tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
 
 
 def _activate_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -215,7 +237,8 @@ def load_admin_auth_payload() -> dict[str, Any]:
     s3_payload = _read_s3_payload()
     if s3_payload is not None:
         try:
-            _write_json_file_atomic(AUTH_FILE, s3_payload)
+            with _AUTH_FILE_WRITE_LOCK:
+                _write_json_file_atomic(AUTH_FILE, s3_payload)
         except Exception:
             pass
         return _activate_payload(s3_payload)
@@ -236,7 +259,8 @@ def load_admin_auth_payload() -> dict[str, Any]:
 def save_admin_auth_payload(payload: dict[str, Any]) -> None:
     persisted = dict(payload)
     persisted["tokens"] = _normalize_token_sessions(payload.get("tokens"))
-    _write_json_file_atomic(AUTH_FILE, persisted)
+    with _AUTH_FILE_WRITE_LOCK:
+        _write_json_file_atomic(AUTH_FILE, persisted)
     try:
         _write_s3_payload(persisted)
     except Exception:

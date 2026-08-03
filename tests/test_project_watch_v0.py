@@ -182,6 +182,83 @@ class ProjectWatchServiceTests(unittest.TestCase):
         candidate = listed[0]["related_signal_candidates"][0]
         self.assertEqual(candidate["candidate_role"], "review_candidate_only")
         self.assertEqual(candidate["status"], "unseen")
+        self.assertIn("title_anchor_terms", {reason["code"] for reason in candidate["match_reasons"]})
+
+    def test_matcher_requires_title_anchor_and_does_not_treat_same_project_as_enough(self):
+        with watch_temp_dir():
+            create_watch()
+            result = project_watch_service.match_signal_to_active_project_watches(
+                {
+                    "signal_id": "sig-generic-project",
+                    "title": "Quarterly product roadmap update",
+                    "summary": "The project has a new tool and more context for review.",
+                    "subscription_project_links": [{"project_id": "ai_radar"}],
+                },
+                project_ids=["ai_radar"],
+            )
+
+        self.assertEqual(result["created_count"], 0)
+        self.assertEqual(result["matches"], [])
+
+    def test_matcher_ignores_generated_interpretation_fields(self):
+        with watch_temp_dir():
+            create_watch()
+            result = project_watch_service.match_signal_to_active_project_watches(
+                {
+                    "signal_id": "sig-generated-only",
+                    "title": "Video editor release",
+                    "summary": "A creator application added timeline shortcuts.",
+                    "synthesized_insight": "MemoryMesh protocol adoption may validate the Watch.",
+                    "relevance_to_projects": "AI Radar should review MemoryMesh evidence.",
+                },
+                project_ids=["ai_radar"],
+            )
+
+        self.assertEqual(result["created_count"], 0)
+        self.assertEqual(result["matches"], [])
+
+    def test_matcher_does_not_qualify_on_weak_prompt_anchor_alone(self):
+        with watch_temp_dir():
+            create_watch()
+            result = project_watch_service.match_signal_to_active_project_watches(
+                {
+                    "signal_id": "sig-prompt-cache",
+                    "title": "Explicit prompt caching arrives",
+                    "summary": "The cache reduces inference cost for repeated prompts.",
+                },
+                project_ids=["ai_radar"],
+            )
+
+        self.assertEqual(result["created_count"], 0)
+        self.assertEqual(result["matches"], [])
+
+    def test_matcher_normalizes_eval_and_harness_inflections(self):
+        with watch_temp_dir():
+            project_watch_service.create_project_watch_item(
+                "ai_radar",
+                origin_signal_id="sig-eval-origin",
+                origin_signal_title="Prompt evaluation harness launch",
+                watch_question="Will practitioner-built eval harnesses become repeatable?",
+                watch_reason="A repeatable evaluation workflow may become a team standard.",
+                success_criteria="Independent prompt eval tools adopt the harness pattern.",
+                exit_criteria="No repeatable evaluation workflow appears.",
+                next_review_at="2026-08-20",
+                verification_metadata=watch_allowed_verification(),
+            )
+            result = project_watch_service.match_signal_to_active_project_watches(
+                {
+                    "signal_id": "sig-evals",
+                    "title": "Independent prompt evals add reusable harnesses",
+                    "summary": "Teams compare prompt evaluation workflows across tools.",
+                },
+                project_ids=["ai_radar"],
+            )
+
+        self.assertEqual(result["created_count"], 1)
+        reasons = result["matches"][0]["match_reasons"]
+        title_reason = next(reason for reason in reasons if reason["code"] == "title_anchor_terms")
+        self.assertIn("eval", title_reason["matched_terms"])
+        self.assertIn("harness", title_reason["matched_terms"])
 
     def test_matcher_does_not_create_candidate_for_unrelated_signal(self):
         with watch_temp_dir():
