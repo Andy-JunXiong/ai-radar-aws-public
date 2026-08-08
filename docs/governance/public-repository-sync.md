@@ -1,6 +1,6 @@
 ---
 title: Private And Public GitHub Synchronization
-last_updated: 2026-08-02
+last_updated: 2026-08-09
 layer: L2-operating-guidance
 audience: AI agents + human collaborators
 tags: [github, public-release, sanitization, sync]
@@ -10,15 +10,25 @@ tags: [github, public-release, sanitization, sync]
 
 ## User Command Contract
 
-Unless the authenticated user names only one target, `commit and push` means:
+### Current repository-only operation
 
-1. commit and push the approved private scope to
-   `Andy-JunXiong/ai-radar-aws`;
-2. prepare an independently committed sanitized snapshot and push it to
-   `Andy-JunXiong/ai-radar-aws-public`.
+`commit and push current repository` authorizes the approved scope in the
+current repository only.
+Completion depends only on that authorized operation. The normal private-source
+workflow uses `Andy-JunXiong/ai-radar-aws`.
 
-Do not report the operation as complete until both targets succeed. A failure
-or safety blocker on either target makes the result partial.
+### Standalone public synchronization
+
+`sync public repo` explicitly authorizes sanitized public synchronization.
+Completion depends on successful public synchronization and all required
+public-safety checks.
+
+### Dual-repository main operation
+
+`commit and push` explicitly authorizes both the private-source operation and
+independent sanitized public synchronization. `commit, push, and sync public`
+has the same dual-repository meaning. Full completion requires both to succeed.
+If either side fails or is blocked, report the result as partial.
 
 ## History Boundary
 
