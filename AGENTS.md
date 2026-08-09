@@ -18,6 +18,21 @@ documentation without private runtime data.
   maintainer authorization.
 - Do not commit or push unless the user explicitly requests it.
 
+## Private-to-Public Synchronization
+
+- A dual-repository `commit and push` creates an independently committed,
+  sanitized public snapshot; never push private `main`, private commit history,
+  or a private working tree directly to this repository.
+- Copy only an explicitly reviewed public-safe allowlist from the committed
+  private tree. All private or sensitive material must be removed or excluded
+  before publication.
+- Exclude credentials, tokens, secrets, private runtime data, production
+  endpoints, AWS/account/role/bucket details, deployment runbooks, internal
+  routing, machine-specific paths, and internal records.
+- If a file's publication safety is uncertain, exclude it and request maintainer
+  review. Follow `docs/governance/public-repository-sync.md` for the detailed
+  synchronization procedure.
+
 ## Development Flow
 
 1. Read the smallest relevant code and documentation set.
