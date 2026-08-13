@@ -27,7 +27,10 @@ function loadTsModule(relativePath) {
   return sandbox.module.exports;
 }
 
-const { buildStateAwareGuidanceResponse } = loadTsModule("components/operatorGuidanceState.ts");
+const {
+  buildReviewRecordLineageGuidanceContext,
+  buildStateAwareGuidanceResponse,
+} = loadTsModule("components/operatorGuidanceState.ts");
 const {
   buildGlobalGuidanceAnswer,
   findGuidanceEntry,
@@ -42,6 +45,7 @@ function runCase(testCase) {
     {
       pathname: testCase.pathname,
       text: testCase.pageText,
+      objectContext: testCase.objectContext,
     },
     testCase.language || "zh"
   );
@@ -62,6 +66,36 @@ function runCase(testCase) {
     );
   }
 }
+
+const normalizedLineageContext = buildReviewRecordLineageGuidanceContext(
+  {
+    item: { id: "prv-current", project_id: "ai-radar", signal_id: "sig-1" },
+    related_calibration_events: [
+      { event_type: "watch_item_created" },
+      { event_type: "review_record_created" },
+      { event_type: "watch_item_created" },
+    ],
+    audit_summary: {
+      event_count: 3,
+      matching_review_record_event_count: 1,
+      has_review_record_created: true,
+      has_outcome_event: true,
+    },
+  },
+  "prv-current"
+);
+assert.equal(normalizedLineageContext?.recordId, "prv-current");
+assert.equal(normalizedLineageContext?.eventCount, 3);
+assert.equal(normalizedLineageContext?.matchingReviewRecordEventCount, 1);
+assert.equal(normalizedLineageContext?.eventTypes.join(","), "review_record_created,watch_item_created");
+assert.equal(
+  buildReviewRecordLineageGuidanceContext(
+    { item: { id: "prv-other", project_id: "ai-radar", signal_id: "sig-1" } },
+    "prv-current"
+  ),
+  null,
+  "lineage context must reject a response for a different Review Record"
+);
 
 function collectPageRoutes(dir, prefix = "") {
   const routes = [];
@@ -745,6 +779,60 @@ const cases = [
     mustNotInclude: ["Action is allowed", "Generate Insight", "Manual Upload"],
   },
   {
+    name: "review record detail guidance consumes typed lineage projection",
+    pathname: "/workspace/projects/review/record",
+    pageText: `${reviewRecordDetailText}\nRelated Events 999\nCurrent Review Record Not returned`,
+    question: "What is the Audit Trail?",
+    language: "en",
+    objectContext: {
+      kind: "review_record_lineage",
+      recordId: "prv-current",
+      projectId: "ai-radar",
+      signalId: "sig-1",
+      eventCount: 2,
+      matchingReviewRecordEventCount: 1,
+      hasReviewRecordCreated: true,
+      hasOutcomeEvent: true,
+      eventTypes: ["review_record_created", "watch_item_created"],
+    },
+    mustInclude: [
+      "typed lineage projection returned 2 related calibration events",
+      "1 is directly linked to the current Review Record",
+      "review record created, watch item created",
+      "review-record-created event was returned",
+      "an outcome event was returned",
+      "read-only audit context",
+      "does not make the source more verified",
+    ],
+    mustNotInclude: ["999", "Action is allowed", "Generate Insight", "Manual Upload"],
+  },
+  {
+    name: "review record detail lineage guidance does not invent missing events",
+    pathname: "/workspace/projects/review/record",
+    pageText: `${reviewRecordDetailText}\nRelated Events 8\nCurrent Review Record`,
+    question: "Which calibration events are in the Audit Trail?",
+    language: "en",
+    objectContext: {
+      kind: "review_record_lineage",
+      recordId: "prv-empty",
+      projectId: "ai-radar",
+      signalId: "sig-empty",
+      eventCount: 0,
+      matchingReviewRecordEventCount: 0,
+      hasReviewRecordCreated: false,
+      hasOutcomeEvent: false,
+      eventTypes: [],
+    },
+    mustInclude: [
+      "returned 0 related calibration events",
+      "0 are directly linked",
+      "Returned event types: none returned",
+      "review-record-created event was not returned",
+      "an outcome event was not returned",
+    ],
+    mustNotInclude: ["Related Events 8", "Action is allowed", "verified claim"],
+  },
+  {
     name: "trajectory manual source intent stays non-verification",
     pathname: "/workspace/projects/trajectory",
     pageText: trajectoryTimelineText,
@@ -1086,10 +1174,22 @@ for (const testCase of cases) {
 const discoveredRoutes = collectPageRoutes(join(process.cwd(), "app"));
 const routesWithoutOperatorGuidance = new Set(["/portfolio"]);
 const appChromeSource = readFileSync(join(process.cwd(), "components/AppChrome.tsx"), "utf8");
+const operatorGuidanceWidgetSource = readFileSync(
+  join(process.cwd(), "components/OperatorGuidanceWidget.tsx"),
+  "utf8"
+);
 assert.ok(
   appChromeSource.includes("if (isPortfolio)") &&
     appChromeSource.indexOf("if (isPortfolio)") < appChromeSource.indexOf("<OperatorGuidanceWidget />"),
   "portfolio must exit to public chrome before Operator Guidance is mounted"
+);
+assert.ok(
+  operatorGuidanceWidgetSource.includes('aria-label={isExpanded ? "Restore compact guidance panel" : "Extend guidance panel vertically"}') &&
+    operatorGuidanceWidgetSource.includes('aria-pressed={isExpanded}') &&
+    operatorGuidanceWidgetSource.includes('{isExpanded ? "Compact" : "Taller"}') &&
+    operatorGuidanceWidgetSource.includes('width: "min(480px, calc(100vw - 32px))"') &&
+    operatorGuidanceWidgetSource.includes('height: "min(920px, calc(100vh - 110px))"'),
+  "Operator Guidance must expose an accessible tall/compact panel toggle without a wide overlay"
 );
 
 const guidanceRoutes = discoveredRoutes.filter((route) => !routesWithoutOperatorGuidance.has(route));

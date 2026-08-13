@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from app.services.project_calibration_event_service import append_project_calibration_event, list_project_calibration_events
+from app.services.project_lineage_projection_service import build_review_record_lineage_projection
 from app.services.project_takeaway_constants import (
     PROJECT_IMPROVEMENT_STATUS_ACTION_COMPLETED,
     REVIEW_OUTCOME_ACTION,
@@ -369,43 +370,9 @@ def build_project_review_record_detail(record_id: str) -> dict[str, Any] | None:
         project_id=_safe_text(record.get("project_id")),
         signal_id=_safe_text(record.get("signal_id")),
     )
-    current_record_id = _safe_text(record.get("id"))
-    related_events = [
-        {
-            "id": event.get("id"),
-            "event_type": event.get("event_type"),
-            "outcome": event.get("outcome"),
-            "source_status": event.get("source_status"),
-            "review_record_id": event.get("review_record_id"),
-            "is_current_review_record_event": _safe_text(event.get("review_record_id")) == current_record_id,
-            "created_at": event.get("created_at"),
-            "updated_at": event.get("updated_at"),
-        }
-        for event in calibration_events
-    ]
-    related_events = sorted(
-        related_events,
-        key=lambda event: (
-            bool(event.get("is_current_review_record_event")),
-            _safe_text(event.get("updated_at") or event.get("created_at")),
-        ),
-        reverse=True,
-    )[:20]
-    matching_review_record_event_count = sum(
-        1 for event in related_events if _safe_text(event.get("review_record_id")) == current_record_id
-    )
+    lineage = build_review_record_lineage_projection(record, calibration_events)
     return {
         "item": record,
-        "related_calibration_events": related_events,
-        "audit_summary": {
-            "event_count": len(related_events),
-            "has_review_record_created": any(
-                event.get("event_type") == "review_record_created" for event in related_events
-            ),
-            "has_outcome_event": any(
-                event.get("event_type") != "review_record_created" for event in related_events
-            ),
-            "matching_review_record_event_count": matching_review_record_event_count,
-        },
+        **lineage,
         "message": "project review record loaded successfully",
     }

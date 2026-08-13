@@ -1,11 +1,19 @@
 "use client";
 
-import { FormEvent, Suspense, useMemo, useState } from "react";
+import { FormEvent, Suspense, useEffect, useMemo, useState } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
+
+import { apiUrl } from "@/lib/api";
+import { adminFetchWithTimeout } from "@/lib/requestTimeout";
 
 import { buildGlobalGuidanceAnswer, buildGuidanceAnswer, detectGuidanceLanguage, findGuidanceEntry } from "./operatorGuidanceData";
 import { buildMiniRagGuidanceResponse } from "./operatorGuidanceRetriever";
-import { buildStateAwareGuidanceResponse } from "./operatorGuidanceState";
+import {
+  buildReviewRecordLineageGuidanceContext,
+  buildStateAwareGuidanceResponse,
+  type ReviewRecordLineageGuidanceContext,
+  type ReviewRecordLineageResponse,
+} from "./operatorGuidanceState";
 
 type WidgetMessage = {
   id: string;
@@ -24,11 +32,15 @@ export default function OperatorGuidanceWidget() {
 function OperatorGuidanceWidgetInner() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const reviewRecordId = pathname?.startsWith("/workspace/projects/review/record")
+    ? searchParams.get("id") || ""
+    : "";
   const contextKey = useMemo(() => {
     const query = searchParams.toString();
     return `${pathname || "/"}${query ? `?${query}` : ""}`;
   }, [pathname, searchParams]);
   const [isOpen, setIsOpen] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
   const [question, setQuestion] = useState("");
   const initialMessages = useMemo<WidgetMessage[]>(() => [
     {
@@ -38,7 +50,41 @@ function OperatorGuidanceWidgetInner() {
     },
   ], []);
   const [messagesByContext, setMessagesByContext] = useState<Record<string, WidgetMessage[]>>({});
+  const [reviewRecordLineage, setReviewRecordLineage] = useState<ReviewRecordLineageGuidanceContext | null>(null);
   const messages = messagesByContext[contextKey] || initialMessages;
+  const activeReviewRecordLineage = reviewRecordLineage?.recordId === reviewRecordId
+    ? reviewRecordLineage
+    : null;
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!reviewRecordId) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    async function loadReviewRecordLineage() {
+      try {
+        const response = await adminFetchWithTimeout(
+          apiUrl(`/projects/review-records/${encodeURIComponent(reviewRecordId)}`),
+          { cache: "no-store" }
+        );
+        if (!response.ok) return;
+        const data = (await response.json().catch(() => null)) as ReviewRecordLineageResponse | null;
+        if (!cancelled) {
+          setReviewRecordLineage(buildReviewRecordLineageGuidanceContext(data, reviewRecordId));
+        }
+      } catch {
+        if (!cancelled) setReviewRecordLineage(null);
+      }
+    }
+
+    void loadReviewRecordLineage();
+    return () => {
+      cancelled = true;
+    };
+  }, [reviewRecordId]);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -50,6 +96,7 @@ function OperatorGuidanceWidgetInner() {
     const pageState = {
       pathname: currentPath,
       text: typeof document === "undefined" ? "" : document.body.innerText,
+      objectContext: activeReviewRecordLineage,
     };
     const globalAnswer = buildGlobalGuidanceAnswer(trimmed, language, currentPath);
     const stateAwareAnswer = buildStateAwareGuidanceResponse(trimmed, pageState, language);
@@ -84,18 +131,29 @@ function OperatorGuidanceWidgetInner() {
   return (
     <div style={widgetRootStyle}>
       {isOpen ? (
-        <section style={panelStyle} aria-label="Operator guidance dialog">
+        <section style={isExpanded ? expandedPanelStyle : panelStyle} aria-label="Operator guidance dialog">
           <div style={panelHeaderStyle}>
             <div>
               <div style={eyebrowStyle}>Operator Guidance</div>
               <div style={titleStyle}>Ask AI Radar</div>
             </div>
-            <button type="button" onClick={() => setIsOpen(false)} style={iconButtonStyle} aria-label="Close operator guidance">
-              x
-            </button>
+            <div style={panelActionsStyle}>
+              <button
+                type="button"
+                onClick={() => setIsExpanded((current) => !current)}
+                style={resizeButtonStyle}
+                aria-label={isExpanded ? "Restore compact guidance panel" : "Extend guidance panel vertically"}
+                aria-pressed={isExpanded}
+              >
+                {isExpanded ? "Compact" : "Taller"}
+              </button>
+              <button type="button" onClick={() => setIsOpen(false)} style={iconButtonStyle} aria-label="Close operator guidance">
+                x
+              </button>
+            </div>
           </div>
 
-          <div style={messagesStyle}>
+          <div style={isExpanded ? expandedMessagesStyle : messagesStyle}>
             {messages.map((message) => (
               <div key={message.id} style={message.role === "operator" ? operatorBubbleStyle : assistantBubbleStyle}>
                 <div style={messageRoleStyle}>{message.role === "operator" ? "You" : "Guidance"}</div>
@@ -145,7 +203,14 @@ const panelStyle = {
   boxShadow: "0 24px 70px rgba(15, 23, 42, 0.24)",
   padding: "16px",
   display: "grid",
+  gridTemplateRows: "auto minmax(0, 1fr) auto",
   gap: "12px",
+} as const;
+
+const expandedPanelStyle = {
+  ...panelStyle,
+  width: "min(480px, calc(100vw - 32px))",
+  height: "min(920px, calc(100vh - 110px))",
 } as const;
 
 const panelHeaderStyle = {
@@ -153,6 +218,12 @@ const panelHeaderStyle = {
   alignItems: "flex-start",
   justifyContent: "space-between",
   gap: "12px",
+} as const;
+
+const panelActionsStyle = {
+  display: "flex",
+  alignItems: "center",
+  gap: "8px",
 } as const;
 
 const eyebrowStyle = {
@@ -182,12 +253,30 @@ const iconButtonStyle = {
   fontWeight: 850,
 } as const;
 
+const resizeButtonStyle = {
+  minHeight: "32px",
+  borderRadius: "8px",
+  border: "1px solid var(--app-secondary-action-border)",
+  background: "var(--app-secondary-action-bg)",
+  color: "var(--app-secondary-action-fg)",
+  padding: "6px 10px",
+  cursor: "pointer",
+  fontSize: "12px",
+  fontWeight: 800,
+} as const;
+
 const messagesStyle = {
   display: "grid",
   gap: "9px",
   maxHeight: "280px",
   overflowY: "auto",
   paddingRight: "4px",
+} as const;
+
+const expandedMessagesStyle = {
+  ...messagesStyle,
+  minHeight: 0,
+  maxHeight: "none",
 } as const;
 
 const assistantBubbleStyle = {

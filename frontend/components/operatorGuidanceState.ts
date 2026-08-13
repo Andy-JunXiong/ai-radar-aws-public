@@ -1,8 +1,38 @@
 export type GuidanceLanguage = "en" | "zh";
 
+export type ReviewRecordLineageGuidanceContext = {
+  kind: "review_record_lineage";
+  recordId: string;
+  projectId: string;
+  signalId: string;
+  eventCount: number;
+  matchingReviewRecordEventCount: number;
+  hasReviewRecordCreated: boolean;
+  hasOutcomeEvent: boolean;
+  eventTypes: string[];
+};
+
+export type ReviewRecordLineageResponse = {
+  item?: {
+    id?: string;
+    project_id?: string;
+    signal_id?: string;
+  };
+  related_calibration_events?: Array<{
+    event_type?: string;
+  }>;
+  audit_summary?: {
+    event_count?: number;
+    matching_review_record_event_count?: number;
+    has_review_record_created?: boolean;
+    has_outcome_event?: boolean;
+  };
+};
+
 export type GuidancePageState = {
   pathname: string;
   text: string;
+  objectContext?: ReviewRecordLineageGuidanceContext | null;
 };
 
 function normalize(value: string) {
@@ -11,6 +41,42 @@ function normalize(value: string) {
 
 function hasAny(text: string, needles: string[]) {
   return needles.some((needle) => text.includes(needle));
+}
+
+function formatEventType(value: string) {
+  return value.replace(/_/g, " ").trim();
+}
+
+export function buildReviewRecordLineageGuidanceContext(
+  data: ReviewRecordLineageResponse | null,
+  requestedRecordId: string
+): ReviewRecordLineageGuidanceContext | null {
+  const item = data?.item;
+  if (!item?.id || item.id !== requestedRecordId || !item.project_id || !item.signal_id) return null;
+
+  const events = Array.isArray(data?.related_calibration_events)
+    ? data.related_calibration_events
+    : [];
+  const eventTypes = Array.from(new Set(
+    events
+      .map((event) => event.event_type?.trim() || "")
+      .filter(Boolean)
+  )).sort();
+
+  return {
+    kind: "review_record_lineage",
+    recordId: item.id,
+    projectId: item.project_id,
+    signalId: item.signal_id,
+    eventCount: Math.max(0, Number(data?.audit_summary?.event_count) || 0),
+    matchingReviewRecordEventCount: Math.max(
+      0,
+      Number(data?.audit_summary?.matching_review_record_event_count) || 0
+    ),
+    hasReviewRecordCreated: data?.audit_summary?.has_review_record_created === true,
+    hasOutcomeEvent: data?.audit_summary?.has_outcome_event === true,
+    eventTypes,
+  };
 }
 
 function wantsNextStep(question: string) {
@@ -843,6 +909,20 @@ export function buildStateAwareGuidanceResponse(
       );
     }
     if (auditTrailQuestion) {
+      const lineage = state.objectContext?.kind === "review_record_lineage"
+        ? state.objectContext
+        : null;
+      if (lineage) {
+        const eventTypes = lineage.eventTypes.map(formatEventType).filter(Boolean);
+        const eventTypeSummary = eventTypes.length > 0 ? eventTypes.join(", ") : "none returned";
+        const lineageAnswer = [
+          `The typed lineage projection returned ${lineage.eventCount} related calibration events for the same project and signal; ${lineage.matchingReviewRecordEventCount} ${lineage.matchingReviewRecordEventCount === 1 ? "is" : "are"} directly linked to the current Review Record.`,
+          `Returned event types: ${eventTypeSummary}. The review-record-created event was ${lineage.hasReviewRecordCreated ? "returned" : "not returned"}; an outcome event was ${lineage.hasOutcomeEvent ? "returned" : "not returned"}.`,
+          "This is read-only audit context for reconstructing what happened; it does not make the source more verified, reopen the review, or bypass downstream gates.",
+          `${suggestedButton(language, "Trajectory")} Use Trajectory when you need the longer learning-history view for this decision.`,
+        ];
+        return formatAnswer(language, lineageAnswer, lineageAnswer);
+      }
       return formatAnswer(
         language,
         [
