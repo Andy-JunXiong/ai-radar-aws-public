@@ -54,8 +54,63 @@ class ProjectTakeawayCandidatePolicyTests(unittest.TestCase):
             "strong_recommendation",
             envelope.verification_metadata["blocked_downstream_actions"],
         )
+        self.assertEqual(envelope.verification_metadata["claim_support_summary"], {})
         self.assertTrue(envelope.policy.action_eligibility["project_takeaway_candidate"]["allowed"])
         self.assertFalse(envelope.policy.action_eligibility["low_risk_action_candidate"]["allowed"])
+
+    def test_incomplete_verification_contract_fails_closed(self):
+        incomplete_cases = (
+            {"blocked_downstream_actions": []},
+            {"claim_support_summary": {}},
+            {"verification_status": "verified"},
+            {
+                "verification_status": "verified",
+                "blocked_downstream_actions": [],
+            },
+            {
+                "verification_status": "verified",
+                "claim_support_summary": {"directly_supported": 1},
+            },
+        )
+
+        for verification in incomplete_cases:
+            with self.subTest(verification=verification):
+                policy = evaluate_project_takeaway_candidate_policy(verification)
+
+                self.assertFalse(policy.allowed)
+                self.assertFalse(
+                    policy.action_eligibility["project_takeaway_candidate"]["allowed"]
+                )
+                self.assertFalse(
+                    policy.action_eligibility["low_risk_action_candidate"]["allowed"]
+                )
+                self.assertIn(
+                    "missing_verification_context",
+                    policy.action_eligibility["project_takeaway_candidate"]["gate"]["reason_codes"],
+                )
+
+    def test_relevance_and_cognitive_context_do_not_change_weak_evidence_gates(self):
+        verification = {
+            "verification_status": "weakly_supported",
+            "claim_support_summary": {"inferred": 1},
+            "allowed_downstream_actions": ["project_takeaway_candidate", "watch_only"],
+            "blocked_downstream_actions": ["low_risk_action_candidate"],
+        }
+        baseline = evaluate_project_takeaway_candidate_policy(verification)
+        with_context = evaluate_project_takeaway_candidate_policy(
+            {
+                **verification,
+                "project_relevance": "high",
+                "reflection": "This cognitive context strongly agrees.",
+                "rejected_learning_context": ["A previous reviewer rejected a similar item."],
+            }
+        )
+
+        self.assertTrue(baseline.allowed)
+        self.assertEqual(with_context, baseline)
+        self.assertFalse(
+            with_context.action_eligibility["low_risk_action_candidate"]["allowed"]
+        )
 
     def test_confirmed_final_takeaway_is_review_context_and_blocks_low_risk_action(self):
         envelope = build_project_takeaway_candidate_input(
@@ -78,6 +133,7 @@ class ProjectTakeawayCandidatePolicyTests(unittest.TestCase):
             "strong_recommendation",
             envelope.verification_metadata["blocked_downstream_actions"],
         )
+        self.assertEqual(envelope.verification_metadata["claim_support_summary"], {})
         self.assertTrue(envelope.policy.action_eligibility["project_takeaway_candidate"]["allowed"])
         self.assertFalse(envelope.policy.action_eligibility["low_risk_action_candidate"]["allowed"])
 

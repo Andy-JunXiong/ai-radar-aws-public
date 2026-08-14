@@ -36,6 +36,12 @@ WATCH_FRIENDLY_STATUSES = {
     STATUS_WEAKLY_SUPPORTED,
 }
 
+PROJECT_TAKEAWAY_VERIFICATION_REQUIRED_FIELDS = (
+    "verification_status",
+    "blocked_downstream_actions",
+    "claim_support_summary",
+)
+
 
 def get_verified_insight_object(verification: dict[str, Any] | None) -> dict[str, Any]:
     if not isinstance(verification, dict):
@@ -141,20 +147,10 @@ def has_project_takeaway_verification_context(verification: dict[str, Any] | Non
     if not isinstance(verification, dict) or not verification:
         return False
 
-    if isinstance(verification.get("verified_insight"), dict):
-        return True
-    if str(verification.get("verification_status") or "").strip():
-        return True
-    if isinstance(verification.get("claim_support_summary"), dict):
-        return True
-    if isinstance(verification.get("allowed_downstream_actions"), list):
-        return True
-    if isinstance(verification.get("blocked_downstream_actions"), list):
-        return True
-    if bool(verification.get("knowledge_convergence")):
-        return True
-
-    return False
+    return all(
+        _verification_contract_field_present(verification, field)
+        for field in PROJECT_TAKEAWAY_VERIFICATION_REQUIRED_FIELDS
+    )
 
 
 def get_confidence_score(verification: dict[str, Any] | None) -> float | None:
@@ -199,11 +195,7 @@ VERIFICATION_CONTRACT_REQUIRED_FIELDS_BY_CONTEXT = {
         "evidence_level",
         "blocked_downstream_actions",
     ),
-    "project_takeaway_candidate": (
-        "verification_status",
-        "blocked_downstream_actions",
-        "claim_support_summary",
-    ),
+    "project_takeaway_candidate": PROJECT_TAKEAWAY_VERIFICATION_REQUIRED_FIELDS,
     "lifecycle_support_snapshot": (
         "verification_status",
         "blocked_downstream_actions",

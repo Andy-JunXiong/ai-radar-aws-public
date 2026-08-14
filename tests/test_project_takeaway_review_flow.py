@@ -153,6 +153,7 @@ class ProjectTakeawayReviewFlowTests(unittest.TestCase):
                 "verification_status": "knowledge_convergence_review_candidate",
                 "allowed_downstream_actions": ["project_takeaway_candidate"],
                 "blocked_downstream_actions": [],
+                "claim_support_summary": {},
             }
         )
 
@@ -238,6 +239,20 @@ class ProjectTakeawayReviewFlowTests(unittest.TestCase):
         self.assertEqual(context.exception.status_code, 400)
         self.assertIn("requires verification metadata", context.exception.detail)
 
+    def test_create_project_takeaway_candidate_rejects_partial_verification_metadata(self):
+        payload = projects_route.ProjectTakeawayCandidateRequest(
+            signal_id="sig-partial-verification",
+            signal_title="Partial verification",
+            relevance_to_projects={"AI Radar": "This partial contract must fail closed."},
+            verification_metadata={"blocked_downstream_actions": []},
+        )
+
+        with self.assertRaises(HTTPException) as context:
+            projects_route.create_project_takeaway_candidate(payload)
+
+        self.assertEqual(context.exception.status_code, 400)
+        self.assertIn("requires verification metadata", context.exception.detail)
+
     def test_project_takeaway_candidate_write_carries_model_provenance(self):
         produced_by_model = {
             "provider": "openai",
@@ -288,6 +303,7 @@ class ProjectTakeawayReviewFlowTests(unittest.TestCase):
                     "verification_status": "verified",
                     "allowed_downstream_actions": ["project_takeaway_candidate"],
                     "blocked_downstream_actions": [],
+                    "claim_support_summary": {"directly_supported": 1},
                     "produced_by_model": produced_by_model,
                 },
                 candidate_source="verified_insight",
@@ -325,6 +341,7 @@ class ProjectTakeawayReviewFlowTests(unittest.TestCase):
                 "verification_status": "verified",
                 "allowed_downstream_actions": ["project_takeaway_candidate"],
                 "blocked_downstream_actions": [],
+                "claim_support_summary": {"directly_supported": 1},
             },
         )
 

@@ -77,6 +77,8 @@ def normalize_project_takeaway_candidate_verification(
         if action not in blocked:
             blocked.append(action)
     normalized["blocked_downstream_actions"] = blocked
+    if not _has_claim_support_summary(normalized):
+        normalized["claim_support_summary"] = {}
     return normalized
 
 
@@ -205,3 +207,13 @@ def _is_review_context_only_candidate(metadata: dict[str, Any]) -> bool:
         or metadata.get("candidate_requested_from") == "confirmed_final_takeaway"
         or status == "confirmed_final_takeaway_review_candidate"
     )
+
+
+def _has_claim_support_summary(metadata: dict[str, Any]) -> bool:
+    if isinstance(metadata.get("claim_support_summary"), dict):
+        return True
+    verified_insight = metadata.get("verified_insight")
+    if not isinstance(verified_insight, dict):
+        return False
+    claims = verified_insight.get("claims")
+    return isinstance(claims, dict) and isinstance(claims.get("support_summary"), dict)
