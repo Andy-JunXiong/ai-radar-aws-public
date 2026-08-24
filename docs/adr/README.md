@@ -9,6 +9,8 @@ a new ADR that supersedes the old one instead of rewriting the old decision.
 Each ADR should contain:
 
 - **ADR Gate**: the three-condition admission check for a new ADR
+- **Origin & Admission**: the decision source, internal pressure, borrowed
+  pattern, authorial delta, admission result, and human decision owner
 - **Context**: the problem and trigger
 - **Decision**: the decision that was made
 - **Owns**: the boundary governed by the ADR
@@ -51,10 +53,14 @@ Each ADR should contain:
 2. Use the next permanent number; never reuse a deleted number.
 3. Name the file `NNNN-kebab-case-title.md`.
 4. Complete the ADR Gate and proceed only when all three conditions pass.
-5. Add the ADR to this index.
-6. Record related operational, narrative, or capability assets in frontmatter.
+5. Complete Origin & Admission. External inputs must pass ADR-0010; `inbox` or
+   `reject` outcomes do not proceed to an implementation ADR.
+6. Add the ADR to this index.
+7. Record related operational, narrative, or capability assets in frontmatter.
 
 The ADR Gate applies to new ADRs. It is not applied retroactively.
+Origin & Admission applies to new ADRs and material revisions. Do not invent
+missing historical provenance; mark it as unknown and link recoverable evidence.
 
 ## Cross-layer relationships
 

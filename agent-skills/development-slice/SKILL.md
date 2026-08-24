@@ -2,10 +2,11 @@
 name: development-slice
 description: |
   Use when Codex is planning, implementing, validating, or handing off a meaningful AI Radar development slice, especially new product direction, changed priority, ambiguous feature work, or any non-trivial backend/frontend/docs slice that needs matched implementation and business-logic validation.
-status: experimental
-intended_consumers:
-  - codex-cli
-  - claude-code
+metadata:
+  status: experimental
+  intended_consumers:
+    - codex-cli
+    - claude-code
 ---
 
 # Development Slice
@@ -33,6 +34,35 @@ changed priority:
 
 This gate does not apply to a clearly scoped bug fix, typo fix, small test
 addition, or narrow implementation task already approved by the user.
+
+## Feature / Architecture Origin Preflight
+
+Before planning or implementing a meaningful feature or architecture change,
+preserve its decision provenance in the nearest owning ADR or public feature
+design. Chat history and uploaded attachments may be inputs, but they are not a
+durable project record on their own.
+
+Record at minimum:
+
+- `origin_type`: `user_request`, `observed_usage_gap`, `incident`,
+  `external_source`, `existing_invariant`, or `technical_constraint`
+- trigger or source references, plus the concrete internal pressure
+- the borrowed pattern, when applicable, separately from AI Radar's authorial
+  delta
+- ADR-0010 result for external inputs (`admit`, `replace`, `inbox`, `reject`),
+  or `not_applicable_internal`
+- what the change replaces or simplifies, or why it is non-additive
+- the human decision owner, resulting scope, and implementation references
+
+Use an ADR only when its three-condition gate passes. Otherwise use the
+smallest public-safe feature design; do not create a second central feature
+registry. An `inbox` or `reject` result stops implementation. For a narrow bug
+fix, a durable issue, failing test, or code-behavior reference is sufficient
+unless product semantics or architecture changes.
+
+This record is decision provenance only. It does not turn a source into product
+evidence, upgrade verification, or grant implementation authority. Never copy
+private assessments or cognitive logs into the public repository.
 
 ## ADR / Core-Doc Trigger Preflight
 
@@ -67,6 +97,7 @@ was triggered.
 Frame each implementation slice with:
 
 - goal
+- origin/admission record and location
 - non-goals
 - key objects or schema involved
 - relevant files or modules to inspect
@@ -148,6 +179,8 @@ After every completed development slice, tell the user:
 3. If no, explain why automated validation is enough.
 4. The recommended next closed-loop slice, including goal, acceptance signals,
    likely files, and stop condition when a follow-up is warranted.
+5. Where the feature or architecture origin was recorded, or any unresolved
+   provenance gap.
 
 For documentation or ADR slices, also check whether the document creates a
 future implementation milestone, validation step, gap report, or planning

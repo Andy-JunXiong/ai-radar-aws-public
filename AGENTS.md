@@ -33,6 +33,20 @@ documentation without private runtime data.
   review. Follow `docs/governance/public-repository-sync.md` for the detailed
   synchronization procedure.
 
+## Feature And Architecture Origin
+
+Before implementing a meaningful feature or architecture change, preserve its
+decision provenance in the nearest public ADR or feature design. Chat history
+and uploaded attachments alone do not count as a durable project record.
+
+At minimum, distinguish the trigger or source, observed product pressure,
+borrowed pattern from AI Radar's authorial delta, ADR-0010 admission result for
+external inputs, replacement relationship, human decision owner, resulting
+scope, and implementation references. Decision provenance explains why a
+change exists; it is not product evidence, verification metadata, or
+implementation authority. Do not create a second central feature registry or
+publish private assessments and cognitive logs.
+
 ## Development Flow
 
 1. Read the smallest relevant code and documentation set.

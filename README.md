@@ -222,6 +222,10 @@ ai-radar-aws-public/
 - improve project matching and knowledge quality;
 - strengthen verification metadata and held-out evaluation;
 - improve skill and prompt contract discipline;
+- define a Today Overview Product Contract that compresses existing
+  intelligence primitives into a governed read-only decision surface before
+  implementation, without adding a parallel Digest engine or Development
+  domain model;
 - preserve clear boundaries between generated context, verified evidence, and action eligibility.
 
 See [ROADMAP.md](ROADMAP.md) for current direction.
