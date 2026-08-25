@@ -1569,7 +1569,7 @@ class ProjectTakeawayReviewFlowTests(unittest.TestCase):
     def test_review_inbox_list_excludes_closed_candidates(self):
         with patch.object(
             projects_route,
-            "list_projects",
+            "list_active_projects",
             return_value=[{"project_id": "ai_radar", "name": "AI Radar"}],
         ), patch.object(
             projects_route,
