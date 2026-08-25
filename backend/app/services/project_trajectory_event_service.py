@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.services.topic_display_service import canonicalize_topic_label, canonicalize_topic_labels
+
 
 def _safe_int(value: Any) -> int:
     try:
@@ -14,6 +16,20 @@ def _safe_text(value: Any) -> str:
     if value is None:
         return ""
     return str(value).strip()
+
+
+def _topic_label_projections(topics: list[Any]) -> list[dict[str, str]]:
+    projections: list[dict[str, str]] = []
+    seen_raw_labels: set[str] = set()
+    for topic in topics:
+        raw_label = _safe_text(topic)
+        if not raw_label or raw_label in seen_raw_labels:
+            continue
+        seen_raw_labels.add(raw_label)
+        canonical_label = canonicalize_topic_label(raw_label)
+        if canonical_label:
+            projections.append({"raw_label": raw_label, "canonical_label": canonical_label})
+    return projections
 
 
 def derive_trajectory_risk_level(event: dict[str, Any]) -> str:
@@ -50,6 +66,7 @@ def with_trajectory_derivatives(event: dict[str, Any], *, event_kind: str) -> di
 
 
 def trajectory_event_from_review_record(record: dict[str, Any]) -> dict[str, Any]:
+    topics = record.get("topics") if isinstance(record.get("topics"), list) else []
     event = {
         "id": record.get("id") or "",
         "event_kind": "review",
@@ -58,6 +75,9 @@ def trajectory_event_from_review_record(record: dict[str, Any]) -> dict[str, Any
         "project_name": record.get("project_name") or "",
         "signal_id": record.get("signal_id") or "",
         "signal_title": record.get("signal_title") or "",
+        "topics": topics,
+        "topic_display_labels": canonicalize_topic_labels(topics),
+        "topic_label_projections": _topic_label_projections(topics),
         "outcome": record.get("outcome") or "review_recorded",
         "reason": record.get("reason") or "",
         "source_type": record.get("source_type") or "signal",
@@ -91,6 +111,7 @@ def trajectory_event_from_review_record(record: dict[str, Any]) -> dict[str, Any
 
 
 def trajectory_event_from_calibration_event(event: dict[str, Any]) -> dict[str, Any]:
+    topics = event.get("topics") if isinstance(event.get("topics"), list) else []
     trajectory_event = {
         "id": event.get("id") or "",
         "event_kind": "calibration",
@@ -99,6 +120,9 @@ def trajectory_event_from_calibration_event(event: dict[str, Any]) -> dict[str, 
         "project_name": event.get("project_name") or "",
         "signal_id": event.get("signal_id") or "",
         "signal_title": event.get("signal_title") or "",
+        "topics": topics,
+        "topic_display_labels": canonicalize_topic_labels(topics),
+        "topic_label_projections": _topic_label_projections(topics),
         "outcome": event.get("event_type") or event.get("outcome") or "calibration_event",
         "reason": "",
         "followup_result": event.get("followup_result") or "",
@@ -156,12 +180,16 @@ def summarize_trajectory_events(items: list[dict[str, Any]]) -> dict[str, Any]:
     manual_upload_reason_mix: dict[str, int] = {}
     manual_intended_use_mix: dict[str, int] = {}
     manual_cognitive_layer_mix: dict[str, int] = {}
+    topic_mix: dict[str, int] = {}
+    topic_variance_groups: dict[str, dict[str, Any]] = {}
     project_mix: dict[str, dict[str, Any]] = {}
     manual_count = 0
     risk_count = 0
+    topic_event_count = 0
+    unclassified_topic_event_count = 0
     latest_timestamp = ""
 
-    for item in items:
+    for event_index, item in enumerate(items):
         risk_level = _safe_text(item.get("risk_level")) or "low"
         signal_type = _safe_text(item.get("trajectory_signal_type")) or "unknown"
         event_kind = _safe_text(item.get("event_kind")) or "unknown"
@@ -169,11 +197,45 @@ def summarize_trajectory_events(items: list[dict[str, Any]]) -> dict[str, Any]:
         project_id = _safe_text(item.get("project_id")) or "unknown"
         project_name = _safe_text(item.get("project_name")) or project_id
         timestamp = _safe_text(item.get("timestamp"))
+        raw_topics = item.get("topics") if isinstance(item.get("topics"), list) else []
+        topic_display_labels = (
+            canonicalize_topic_labels(item.get("topic_display_labels"))
+            if isinstance(item.get("topic_display_labels"), list)
+            else canonicalize_topic_labels(raw_topics)
+        )
+        topic_label_projections = (
+            item.get("topic_label_projections")
+            if isinstance(item.get("topic_label_projections"), list)
+            else _topic_label_projections(raw_topics)
+        )
+
+        for projection in topic_label_projections:
+            if not isinstance(projection, dict):
+                continue
+            raw_topic = _safe_text(projection.get("raw_label"))
+            canonical_label = canonicalize_topic_label(projection.get("canonical_label"))
+            if not raw_topic or not canonical_label:
+                continue
+            variance_group = topic_variance_groups.get(canonical_label) or {
+                "raw_counts": {},
+                "event_indexes": set(),
+                "project_ids": set(),
+            }
+            _increment_count(variance_group["raw_counts"], raw_topic)
+            variance_group["event_indexes"].add(event_index)
+            variance_group["project_ids"].add(project_id)
+            topic_variance_groups[canonical_label] = variance_group
 
         _increment_count(risk_mix, risk_level)
         _increment_count(signal_type_mix, signal_type)
         _increment_count(event_kind_mix, event_kind)
         _increment_count(source_type_mix, source_type)
+        if topic_display_labels:
+            topic_event_count += 1
+            for topic in topic_display_labels:
+                _increment_count(topic_mix, topic)
+        else:
+            unclassified_topic_event_count += 1
 
         is_manual_source = bool(item.get("is_manual_source")) or source_type == "manual_upload"
         if is_manual_source:
@@ -194,6 +256,8 @@ def summarize_trajectory_events(items: list[dict[str, Any]]) -> dict[str, Any]:
             "risk_count": 0,
             "watch_count": 0,
             "action_count": 0,
+            "topic_counts": {},
+            "unclassified_topic_event_count": 0,
             "latest_timestamp": "",
         }
         project_summary["event_count"] += 1
@@ -206,10 +270,35 @@ def summarize_trajectory_events(items: list[dict[str, Any]]) -> dict[str, Any]:
             project_summary["watch_count"] += 1
         if "action" in outcome or outcome == "confirmed":
             project_summary["action_count"] += 1
+        if topic_display_labels:
+            for topic in topic_display_labels:
+                _increment_count(project_summary["topic_counts"], topic)
+        else:
+            project_summary["unclassified_topic_event_count"] += 1
         if timestamp and timestamp > project_summary["latest_timestamp"]:
             project_summary["latest_timestamp"] = timestamp
             project_summary["project_name"] = project_name
         project_mix[project_id] = project_summary
+
+    project_summaries: list[dict[str, Any]] = []
+    for project_summary in project_mix.values():
+        topic_counts = project_summary.pop("topic_counts", {})
+        project_summaries.append({**project_summary, "topic_mix": _top_counts(topic_counts)})
+
+    topic_variant_summaries = [
+        {
+            "canonical_label": canonical_label,
+            "event_count": len(group["event_indexes"]),
+            "project_count": len(group["project_ids"]),
+            "variants": _top_counts(group["raw_counts"], limit=len(group["raw_counts"])),
+        }
+        for canonical_label, group in topic_variance_groups.items()
+        if len(group["raw_counts"]) > 1
+    ]
+    topic_variant_summaries.sort(
+        key=lambda group: (group["event_count"], group["canonical_label"]),
+        reverse=True,
+    )
 
     return {
         "total_events": len(items),
@@ -220,12 +309,17 @@ def summarize_trajectory_events(items: list[dict[str, Any]]) -> dict[str, Any]:
         "signal_type_mix": signal_type_mix,
         "event_kind_mix": event_kind_mix,
         "source_type_mix": source_type_mix,
+        "topic_event_count": topic_event_count,
+        "unclassified_topic_event_count": unclassified_topic_event_count,
+        "topic_mix": _top_counts(topic_mix, limit=12),
+        "topic_variant_group_count": len(topic_variant_summaries),
+        "topic_variant_groups": topic_variant_summaries,
         "manual_intent_summary": {
             "upload_reason_mix": _top_counts(manual_upload_reason_mix),
             "intended_use_mix": _top_counts(manual_intended_use_mix),
             "cognitive_layer_mix": _top_counts(manual_cognitive_layer_mix),
         },
-        "project_mix": sorted(project_mix.values(), key=lambda project: (project["event_count"], str(project["latest_timestamp"])), reverse=True),
+        "project_mix": sorted(project_summaries, key=lambda project: (project["event_count"], str(project["latest_timestamp"])), reverse=True),
     }
 
 

@@ -203,6 +203,7 @@ class ProjectUpsertRequest(BaseModel):
 class ProjectTakeawayCandidateRequest(BaseModel):
     signal_id: str
     signal_title: str = ""
+    topics: list[str] = []
     signal_summary: str = ""
     why_it_matters: str = ""
     relevance_to_projects: object = ""
@@ -344,6 +345,7 @@ def _create_project_takeaway_candidate_response(
         written = add_signal_to_project_improvements(
             signal_id=payload.signal_id,
             signal_title=payload.signal_title,
+            topics=payload.topics,
             signal_summary=payload.signal_summary,
             why_it_matters=payload.why_it_matters,
             relevance_to_projects=payload.relevance_to_projects,

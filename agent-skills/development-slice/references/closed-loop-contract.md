@@ -86,8 +86,8 @@ specific checkable condition.
 ### Verification Before Completion
 
 Do not claim a slice is complete, fixed, passing, or verified unless the claim
-is backed by fresh evidence from this turn or by an explicitly labeled
-user-reported/manual validation result.
+is backed by fresh evidence, traceable successful evidence that remains valid,
+or an explicitly labeled user-reported/manual validation result.
 
 Fresh evidence can include:
 
@@ -98,14 +98,33 @@ Fresh evidence can include:
 - a user-reported validation result, labeled as user-reported rather than
   Codex-run
 
+Successful implementation evidence remains reusable through status-only
+closeout, handoff, release notes, and other bookkeeping when no executable
+code, configuration, generated artifact, schema, runtime contract, or
+behaviorally coupled dependency has changed since that evidence was produced.
+Report reused evidence as reused, including its validated scope; do not present
+it as a newly run check. Bookkeeping alone must not trigger validation replay.
+
+Choose validation in proportion to effective behavior and risk. Targeted
+validation is the default when the affected behavior can be isolated. After
+Git reconciliation, consider effective changed files, conflicts, path overlap,
+shared contracts/dependencies, schema/API/invariant/runtime coupling, and
+behavioral risk. Run the smallest set that provides fresh evidence for the
+effective reconciled behavior, and expand to full regression when coupling,
+cross-cutting risk, or inability to isolate the behavior justifies it. Path
+non-overlap alone is not evidence of behavioral independence.
+
 If verification was not run, say so. If verification is partial, name the gap.
-If a claim rests on older memory, previous-session results, or source
-self-report, do not phrase it as newly verified.
+If a claim rests on untraceable memory, invalidated results, or source
+self-report, do not phrase it as verified. A traceable earlier result may be
+reused only under the no-invalidating-change rule above.
 
 Completion wording must match evidence:
 
 - use `implemented` for code or document changes that were applied
 - use `Codex-validated` only for checks Codex ran in this turn
+- use `reused Codex validation` for traceable checks that remain valid but were
+  not rerun
 - use `user-reported validation` only for checks reported by the user
 - use `not run` or `not covered` when evidence is absent
 

@@ -7,6 +7,13 @@ from urllib import parse, request
 
 from dotenv import load_dotenv
 
+from signal_collectors.collection_coverage import (
+    CollectionCoverageTracker,
+    InvalidCollectionResponse,
+    failure_reason_code,
+    with_collection_coverage,
+)
+
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 OUTPUT_FILE = BASE_DIR / "data" / "output" / "hackernews_friction_signals.json"
@@ -60,7 +67,9 @@ def _search_hn(keyword: str) -> list[dict[str, Any]]:
     }
     url = f"{HN_API_BASE}?{parse.urlencode(params)}"
     payload = _hn_request(url)
-    hits = payload.get("hits", []) if isinstance(payload, dict) else []
+    if not isinstance(payload, dict) or not isinstance(payload.get("hits"), list):
+        raise InvalidCollectionResponse("Hacker News response did not contain a hits list")
+    hits = payload["hits"]
     return [item for item in hits if isinstance(item, dict)]
 
 
@@ -112,14 +121,23 @@ def _normalize_hit(hit: dict[str, Any], search_term: str) -> dict[str, Any] | No
 def collect_hackernews_friction_signals() -> list[dict[str, Any]]:
     signals: list[dict[str, Any]] = []
     seen_urls: set[str] = set()
+    coverage = CollectionCoverageTracker(
+        unit_type="query",
+        expected_count=len(HN_FRICTION_KEYWORDS),
+        unit_prefix="hackernews_friction_query",
+    )
 
-    for keyword in HN_FRICTION_KEYWORDS:
+    for query_index, keyword in enumerate(HN_FRICTION_KEYWORDS):
+        coverage.attempt(query_index)
         print(f"[hn_friction] searching Hacker News for {keyword}")
         try:
             hits = _search_hn(keyword)
         except Exception as exc:
             print(f"[hn_friction] search failed for {keyword}: {exc}")
+            coverage.fail(query_index, reason_code=failure_reason_code(exc))
             continue
+
+        coverage.succeed(query_index, item_count=len(hits))
 
         for hit in hits:
             normalized = _normalize_hit(hit, keyword)
@@ -133,13 +151,16 @@ def collect_hackernews_friction_signals() -> list[dict[str, Any]]:
             seen_urls.add(url)
             signals.append(normalized)
 
-    return sorted(
-        signals,
-        key=lambda item: (
-            -int(((item.get("metadata") or {}) if isinstance(item.get("metadata"), dict) else {}).get("hn_comments") or 0),
-            -int(((item.get("metadata") or {}) if isinstance(item.get("metadata"), dict) else {}).get("hn_points") or 0),
-            str(item.get("published_at") or ""),
+    return with_collection_coverage(
+        sorted(
+            signals,
+            key=lambda item: (
+                -int(((item.get("metadata") or {}) if isinstance(item.get("metadata"), dict) else {}).get("hn_comments") or 0),
+                -int(((item.get("metadata") or {}) if isinstance(item.get("metadata"), dict) else {}).get("hn_points") or 0),
+                str(item.get("published_at") or ""),
+            ),
         ),
+        coverage,
     )
 
 

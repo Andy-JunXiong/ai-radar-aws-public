@@ -21,13 +21,26 @@ class AdminAuthSessionTests(unittest.TestCase):
         self.auth_dir = Path(self.temp_dir.name)
         self.original_auth_dir = admin_auth.AUTH_DIR
         self.original_auth_file = admin_auth.AUTH_FILE
+        self.original_legacy_auth_file = admin_auth.LEGACY_AUTH_FILE
         admin_auth.AUTH_DIR = self.auth_dir
         admin_auth.AUTH_FILE = self.auth_dir / "admin_auth.json"
+        admin_auth.LEGACY_AUTH_FILE = self.auth_dir / "legacy_admin_auth.json"
+        self.s3_read_patcher = patch.object(
+            admin_auth,
+            "_read_s3_payload",
+            return_value=None,
+        )
+        self.s3_write_patcher = patch.object(admin_auth, "_write_s3_payload")
+        self.s3_read_patcher.start()
+        self.s3_write_patcher.start()
         admin_auth.ACTIVE_TOKENS.clear()
 
     def tearDown(self):
+        self.s3_write_patcher.stop()
+        self.s3_read_patcher.stop()
         admin_auth.AUTH_DIR = self.original_auth_dir
         admin_auth.AUTH_FILE = self.original_auth_file
+        admin_auth.LEGACY_AUTH_FILE = self.original_legacy_auth_file
         admin_auth.ACTIVE_TOKENS.clear()
         self.temp_dir.cleanup()
 

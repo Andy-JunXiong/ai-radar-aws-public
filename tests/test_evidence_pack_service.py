@@ -1,7 +1,5 @@
 import sys
-import types
 import unittest
-from dataclasses import dataclass
 from pathlib import Path
 from unittest.mock import patch
 
@@ -11,64 +9,6 @@ BACKEND_ROOT = REPO_ROOT / "backend"
 
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
-
-if "dotenv" not in sys.modules:
-    dotenv_stub = types.ModuleType("dotenv")
-    dotenv_stub.load_dotenv = lambda *args, **kwargs: None
-    sys.modules["dotenv"] = dotenv_stub
-
-registry_stub = types.ModuleType("app.prompts.registry")
-registry_stub.signal_insight_prompts = lambda **kwargs: ("system", "user")
-registry_stub.manual_image_analysis_prompt = lambda **kwargs: ("system", "user")
-registry_stub.manual_single_text_user_prompt = lambda **kwargs: "user"
-registry_stub.manual_text_analysis_prompt = lambda **kwargs: ("system", "user")
-registry_stub.manual_text_session_user_prompt = lambda **kwargs: "user"
-registry_stub.source_assistant_prompts = lambda **kwargs: ("system", "user")
-registry_stub.workspace_chat_system_prompt = lambda **kwargs: "system"
-registry_stub.workspace_reflection_polish_prompts = lambda **kwargs: ("system", "user")
-registry_stub.workspace_visual_prompt = lambda **kwargs: ("system", "user")
-def _default_registry_attr(name):
-    return lambda **kwargs: ("system", "user")
-registry_stub.__getattr__ = _default_registry_attr
-sys.modules["app.prompts.registry"] = registry_stub
-
-context_bridge_stub = types.ModuleType("app.services.context_bridge")
-context_bridge_stub.build_analysis_context = lambda user_id=None: {}
-context_bridge_stub.get_context_scope = lambda *args, **kwargs: "default"
-context_bridge_stub.load_personal_context_data = lambda *args, **kwargs: {}
-context_bridge_stub.save_personal_context_data = lambda *args, **kwargs: {}
-sys.modules["app.services.context_bridge"] = context_bridge_stub
-
-llm_executor_stub = types.ModuleType("app.services.llm_executor_service")
-llm_executor_stub.execute_text_json_task = lambda **kwargs: ({}, None)
-llm_executor_stub.execute_vision_json_task = lambda **kwargs: ({}, None)
-llm_executor_stub.execute_text_task = lambda **kwargs: ("", None)
-sys.modules["app.services.llm_executor_service"] = llm_executor_stub
-
-llm_json_stub = types.ModuleType("app.services.llm_json_service")
-llm_json_stub.parse_model_json = lambda raw: __import__("json").loads(raw)
-llm_json_stub.repair_output_to_json_with_openai = lambda *args, **kwargs: {}
-sys.modules["app.services.llm_json_service"] = llm_json_stub
-
-model_router_stub = types.ModuleType("app.services.model_router_service")
-model_router_stub.PROVIDER_ANTHROPIC = "anthropic"
-model_router_stub.PROVIDER_OPENAI = "openai"
-model_router_stub.PROVIDER_PERPLEXITY = "perplexity"
-
-
-@dataclass(frozen=True)
-class StubModelRoute:
-    task_type: str = "insight"
-    tier: str = "tier_2_structured"
-    provider: str = "openai"
-    model: str = "gpt-test"
-    source: str = "env_router"
-
-
-model_router_stub.ModelRoute = StubModelRoute
-model_router_stub.route_task = lambda *args, **kwargs: None
-model_router_stub.router_startup_diagnostics = lambda: {"routes": {}, "route_details": {}, "warnings": []}
-sys.modules["app.services.model_router_service"] = model_router_stub
 
 from app.services.evidence_pack_service import build_signal_evidence_pack  # noqa: E402
 from app.services import signal_insight_service  # noqa: E402

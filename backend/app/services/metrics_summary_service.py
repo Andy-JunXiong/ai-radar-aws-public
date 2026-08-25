@@ -148,6 +148,199 @@ def _avg_number(events: list[dict[str, Any]], field: str) -> float | None:
     return round(sum(values) / len(values), 2)
 
 
+def _string_list(value: Any) -> list[str] | None:
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        return None
+    return list(dict.fromkeys(value))
+
+
+def _collector_coverage_counts(coverage: Any) -> dict[str, Any] | None:
+    if not isinstance(coverage, dict):
+        return None
+    if coverage.get("plan_version") != "collector-coverage-v1":
+        return None
+
+    expected = _string_list(coverage.get("expected_unit_ids"))
+    attempted = _string_list(coverage.get("attempted_unit_ids"))
+    succeeded = _string_list(coverage.get("succeeded_unit_ids"))
+    zero_result = _string_list(coverage.get("zero_result_unit_ids"))
+    failed = coverage.get("failed_units")
+    skipped = coverage.get("skipped_units")
+    if None in (expected, attempted, succeeded, zero_result):
+        return None
+    if not isinstance(failed, list) or not isinstance(skipped, list):
+        return None
+
+    failed_unit_ids: list[str] = []
+    skipped_unit_ids: list[str] = []
+    reason_codes: set[str] = set()
+    for collection, unit_ids in ((failed, failed_unit_ids), (skipped, skipped_unit_ids)):
+        for item in collection:
+            if not isinstance(item, dict):
+                return None
+            unit_id = item.get("unit_id")
+            reason_code = item.get("reason_code")
+            if not isinstance(unit_id, str) or not isinstance(reason_code, str):
+                return None
+            unit_ids.append(unit_id)
+            reason_codes.add(reason_code)
+
+    expected_set = set(expected)
+    attempted_set = set(attempted)
+    succeeded_set = set(succeeded)
+    zero_result_set = set(zero_result)
+    failed_set = set(failed_unit_ids)
+    skipped_set = set(skipped_unit_ids)
+    terminal_set = succeeded_set | failed_set | skipped_set
+    structurally_complete = (
+        attempted_set == expected_set
+        and terminal_set == expected_set
+        and not failed_set
+        and not skipped_set
+        and zero_result_set <= succeeded_set
+    )
+    if not (
+        attempted_set <= expected_set
+        and terminal_set <= expected_set
+        and not (succeeded_set & failed_set)
+        and not (succeeded_set & skipped_set)
+        and not (failed_set & skipped_set)
+    ):
+        return None
+
+    return {
+        "expected": len(expected_set),
+        "attempted": len(attempted_set),
+        "succeeded": len(succeeded_set),
+        "zero_result": len(zero_result_set),
+        "failed": len(failed_set),
+        "skipped": len(skipped_set),
+        "complete": coverage.get("complete") is True and structurally_complete,
+        "reason_codes": reason_codes,
+    }
+
+
+def _build_collection_coverage_summary(
+    latest_pipeline: dict[str, Any],
+    collector_runs: list[dict[str, Any]],
+) -> dict[str, Any]:
+    unknown = {
+        "plan_version": "collector-coverage-v1",
+        "completeness": "unknown",
+        "run_id": latest_pipeline.get("run_id"),
+        "expected_step_count": None,
+        "attempted_step_count": None,
+        "reported_step_count": 0,
+        "expected_unit_count": None,
+        "attempted_unit_count": None,
+        "succeeded_unit_count": None,
+        "zero_result_unit_count": None,
+        "failed_unit_count": None,
+        "skipped_unit_count": None,
+        "unit_counts_complete": False,
+        "missing_step_ids": [],
+        "failed_step_ids": [],
+        "unavailable_step_ids": [],
+        "reason_codes": ["coverage_not_recorded"],
+    }
+    plan = latest_pipeline.get("collector_plan")
+    run_id = latest_pipeline.get("run_id")
+    if not isinstance(plan, dict) or not isinstance(run_id, str) or not run_id:
+        return unknown
+    if plan.get("plan_version") != "pipeline-collector-plan-v1":
+        return unknown
+
+    expected_steps = _string_list(plan.get("expected_step_ids"))
+    attempted_steps = _string_list(plan.get("attempted_step_ids"))
+    if expected_steps is None or attempted_steps is None or not expected_steps:
+        return unknown
+    expected_set = set(expected_steps)
+    attempted_set = set(attempted_steps)
+    if not attempted_set <= expected_set:
+        return unknown
+
+    run_events = [event for event in collector_runs if event.get("run_id") == run_id]
+    events_by_step = {
+        str(event.get("collector_name")): event
+        for event in run_events
+        if event.get("collector_name") in expected_set
+    }
+    missing_step_ids = [
+        step_id
+        for step_id in expected_steps
+        if step_id not in attempted_set or step_id not in events_by_step
+    ]
+    failed_step_ids: list[str] = []
+    unavailable_step_ids: list[str] = []
+    reason_codes: set[str] = set()
+    totals = {
+        "expected": 0,
+        "attempted": 0,
+        "succeeded": 0,
+        "zero_result": 0,
+        "failed": 0,
+        "skipped": 0,
+    }
+    incomplete_unit_coverage = False
+
+    for step_id in expected_steps:
+        event = events_by_step.get(step_id)
+        if not event:
+            continue
+        if event.get("success") is False:
+            failed_step_ids.append(step_id)
+            reason_codes.add("collector_step_failed")
+        counts = _collector_coverage_counts(event.get("coverage"))
+        if counts is None:
+            unavailable_step_ids.append(step_id)
+            continue
+        for key in totals:
+            totals[key] += int(counts[key])
+        reason_codes.update(counts["reason_codes"])
+        if not counts["complete"]:
+            incomplete_unit_coverage = True
+
+    if missing_step_ids:
+        reason_codes.add("collector_steps_missing")
+    if incomplete_unit_coverage:
+        reason_codes.add("unit_coverage_incomplete")
+    if unavailable_step_ids:
+        reason_codes.add("coverage_not_recorded")
+
+    partial = bool(
+        missing_step_ids
+        or failed_step_ids
+        or incomplete_unit_coverage
+        or plan.get("complete") is not True
+    )
+    if partial:
+        completeness = "partial"
+    elif unavailable_step_ids:
+        completeness = "unknown"
+    else:
+        completeness = "complete"
+
+    return {
+        "plan_version": "collector-coverage-v1",
+        "completeness": completeness,
+        "run_id": run_id,
+        "expected_step_count": len(expected_steps),
+        "attempted_step_count": len(attempted_set),
+        "reported_step_count": len(events_by_step),
+        "expected_unit_count": totals["expected"],
+        "attempted_unit_count": totals["attempted"],
+        "succeeded_unit_count": totals["succeeded"],
+        "zero_result_unit_count": totals["zero_result"],
+        "failed_unit_count": totals["failed"],
+        "skipped_unit_count": totals["skipped"],
+        "unit_counts_complete": not missing_step_ids and not unavailable_step_ids,
+        "missing_step_ids": missing_step_ids,
+        "failed_step_ids": failed_step_ids,
+        "unavailable_step_ids": unavailable_step_ids,
+        "reason_codes": sorted(reason_codes),
+    }
+
+
 def _as_number(value: Any) -> float:
     if isinstance(value, (int, float)):
         return float(value)
@@ -547,6 +740,10 @@ def build_daily_metrics_summary(
         for event in signal_timeline_loads
         if event.get("local_snapshot_status") == "stale"
     )
+    collection_coverage = _build_collection_coverage_summary(
+        latest_pipeline,
+        collector_runs,
+    )
 
     return {
         "date": date,
@@ -584,6 +781,7 @@ def build_daily_metrics_summary(
                 for event in collector_runs
                 if event.get("success") is False and event.get("collector_name")
             ],
+            "coverage": collection_coverage,
         },
         "signals": {
             "collected_count": len(collected_signals),

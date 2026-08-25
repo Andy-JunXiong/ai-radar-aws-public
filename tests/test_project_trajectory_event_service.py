@@ -21,6 +21,7 @@ class ProjectTrajectoryEventServiceTests(unittest.TestCase):
                 "project_id": "ai_radar",
                 "project_name": "AI Radar",
                 "signal_id": "manual_123",
+                "topics": ["AI Agents", "Agent UX"],
                 "outcome": "watch",
                 "source_type": "manual_upload",
                 "manual_session_id": "123",
@@ -49,6 +50,7 @@ class ProjectTrajectoryEventServiceTests(unittest.TestCase):
                 "event_type": "takeaway_accepted",
                 "project_id": "ai_radar",
                 "signal_id": "sig_1",
+                "topics": ["AI Policy"],
                 "source_type": "signal",
                 "verification_status": "verified",
                 "created_at": "2026-05-04T13:00:00+00:00",
@@ -62,6 +64,8 @@ class ProjectTrajectoryEventServiceTests(unittest.TestCase):
         self.assertEqual(result["items"][0]["risk_level"], "low")
         self.assertEqual(result["items"][0]["trajectory_signal_type"], "calibration_learning")
         self.assertEqual(result["items"][1]["event_kind"], "review")
+        self.assertEqual(result["items"][1]["topics"], ["AI Agents", "Agent UX"])
+        self.assertEqual(result["items"][1]["topic_display_labels"], ["AI Agents", "Agent UX"])
         self.assertEqual(result["items"][1]["risk_level"], "high")
         self.assertEqual(result["items"][1]["trajectory_signal_type"], "manual_judgment")
         self.assertTrue(result["items"][1]["deep_project_match_required"])
@@ -70,6 +74,17 @@ class ProjectTrajectoryEventServiceTests(unittest.TestCase):
         self.assertEqual(result["items"][1]["deep_project_match_relevant_modules"], ["Project Takeaway Review Loop"])
         self.assertEqual(result["summary"]["risk_mix"], {"low": 1, "high": 1})
         self.assertEqual(result["summary"]["signal_type_mix"], {"calibration_learning": 1, "manual_judgment": 1})
+        self.assertEqual(
+            result["summary"]["topic_mix"],
+            [
+                {"value": "Agent UX", "count": 1},
+                {"value": "AI Policy", "count": 1},
+                {"value": "AI Agents", "count": 1},
+            ],
+        )
+        self.assertEqual(result["summary"]["topic_event_count"], 2)
+        self.assertEqual(result["summary"]["unclassified_topic_event_count"], 0)
+        self.assertEqual(result["summary"]["project_mix"][0]["topic_mix"][0]["count"], 1)
         self.assertEqual(
             result["summary"]["manual_intent_summary"]["upload_reason_mix"],
             [{"value": "Compare against roadmap", "count": 1}],
@@ -96,6 +111,73 @@ class ProjectTrajectoryEventServiceTests(unittest.TestCase):
         self.assertEqual(filtered["count"], 1)
         self.assertEqual(filtered["items"][0]["id"], "prv_manual")
         self.assertEqual(filtered["summary"]["risk_mix"], {"high": 1})
+
+    def test_topic_summary_groups_format_variants_without_rewriting_raw_topics(self):
+        result = service.build_trajectory_events_response(
+            [
+                {
+                    "id": "prv_workflow",
+                    "project_id": "ai_radar",
+                    "signal_id": "sig_workflow",
+                    "topics": ["workflow", "workflow"],
+                    "outcome": "watch",
+                    "reviewed_at": "2026-05-04T12:00:00+00:00",
+                },
+                {
+                    "id": "prv_workflows",
+                    "project_id": "ai_radar",
+                    "signal_id": "sig_workflows",
+                    "topics": ["Workflows"],
+                    "outcome": "watch",
+                    "reviewed_at": "2026-05-04T13:00:00+00:00",
+                },
+            ],
+            [],
+        )
+
+        self.assertEqual(result["items"][0]["topics"], ["Workflows"])
+        self.assertEqual(result["items"][1]["topics"], ["workflow", "workflow"])
+        self.assertEqual(result["items"][0]["topic_display_labels"], ["Workflow"])
+        self.assertEqual(result["items"][1]["topic_display_labels"], ["Workflow"])
+        self.assertEqual(
+            result["items"][1]["topic_label_projections"],
+            [{"raw_label": "workflow", "canonical_label": "Workflow"}],
+        )
+        self.assertEqual(result["summary"]["topic_mix"], [{"value": "Workflow", "count": 2}])
+        self.assertEqual(result["summary"]["project_mix"][0]["topic_mix"], [{"value": "Workflow", "count": 2}])
+        self.assertEqual(result["summary"]["topic_variant_group_count"], 1)
+        variance_group = result["summary"]["topic_variant_groups"][0]
+        self.assertEqual(variance_group["canonical_label"], "Workflow")
+        self.assertEqual(variance_group["event_count"], 2)
+        self.assertEqual(variance_group["project_count"], 1)
+        self.assertEqual(
+            {item["value"]: item["count"] for item in variance_group["variants"]},
+            {"workflow": 1, "Workflows": 1},
+        )
+
+    def test_topic_summary_keeps_legacy_events_unclassified_without_title_inference(self):
+        result = service.build_trajectory_events_response(
+            [
+                {
+                    "id": "prv_legacy",
+                    "project_id": "ai_radar",
+                    "signal_id": "sig_legacy",
+                    "signal_title": "AI Agents should not become an inferred topic",
+                    "outcome": "watch",
+                    "reviewed_at": "2026-05-04T12:00:00+00:00",
+                }
+            ],
+            [],
+        )
+
+        self.assertEqual(result["items"][0]["topics"], [])
+        self.assertEqual(result["summary"]["topic_mix"], [])
+        self.assertEqual(result["summary"]["topic_event_count"], 0)
+        self.assertEqual(result["summary"]["unclassified_topic_event_count"], 1)
+        self.assertEqual(result["summary"]["project_mix"][0]["topic_mix"], [])
+        self.assertEqual(result["summary"]["project_mix"][0]["unclassified_topic_event_count"], 1)
+        self.assertEqual(result["summary"]["topic_variant_group_count"], 0)
+        self.assertEqual(result["summary"]["topic_variant_groups"], [])
 
     def test_calibration_followup_fields_are_exposed_to_trajectory(self):
         result = service.build_trajectory_events_response(

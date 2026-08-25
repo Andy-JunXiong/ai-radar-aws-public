@@ -72,7 +72,7 @@ class ManualUploadE2EFlowTests(unittest.TestCase):
             return_value=None,
         ), patch.object(
             project_intelligence_service,
-            "list_projects",
+            "list_active_projects",
             return_value=[
                 {
                     "project_id": "ai_radar",
@@ -137,8 +137,8 @@ class ManualUploadE2EFlowTests(unittest.TestCase):
             completed_session = manual_route.load_session_detail(session["session_id"])
 
             manual_signal = signals_route.normalize_manual_session(completed_session, 0)
-            review_signal_id = f"manual_{manual_signal['manual_session_id']}"
-            self.assertEqual(manual_signal["signal_id"], session["session_id"])
+            review_signal_id = manual_signal["signal_id"]
+            self.assertEqual(manual_signal["signal_id"], f"manual_{session['session_id']}")
             self.assertEqual(manual_signal["manual_session_id"], session["session_id"])
             self.assertEqual(manual_signal["upload_reason"], "Validate manual E2E handoff")
             self.assertEqual(manual_signal["intended_use"], "Project review and trajectory validation")

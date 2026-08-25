@@ -39,6 +39,7 @@ type ConvergenceBrief = {
   confidence?: string;
   score?: number;
   shared_topics?: string[];
+  topic_display_labels?: string[];
   agent_watch_item?: Highlight;
   friction_item?: Highlight;
   brief?: string;
@@ -208,6 +209,11 @@ function buildProjectTakeawayMap(brief: ConvergenceBrief) {
     acc[key] = `Review ${clean(brief.label) || "this convergence brief"} for ${key}. Shared topics: ${sharedTopics}.`;
     return acc;
   }, {});
+}
+
+function getTopicDisplayLabels(brief: ConvergenceBrief) {
+  const displayLabels = brief.topic_display_labels?.filter(Boolean) || [];
+  return displayLabels.length ? displayLabels : brief.shared_topics?.filter(Boolean) || [];
 }
 
 function buildKnowledgeQuality(brief: ConvergenceBrief): Required<KnowledgeQuality> {
@@ -405,6 +411,7 @@ function KnowledgeBriefDetailContent() {
         body: JSON.stringify({
           signal_id: currentBrief.cluster_id,
           signal_title: `Knowledge Brief: ${clean(currentBrief.label) || "Supply / demand convergence"}`,
+          topics: currentBrief.shared_topics?.filter(Boolean) || [],
           signal_summary: clean(currentBrief.brief),
           why_it_matters: clean(currentBrief.why_it_matters),
           relevance_to_projects: takeawayMap,
@@ -570,12 +577,15 @@ function KnowledgeBriefDetailContent() {
             </div>
           </div>
           <div style={chipRowStyle}>
-            {(currentBrief.shared_topics || []).map((topic) => (
+            {getTopicDisplayLabels(currentBrief).map((topic) => (
               <span key={topic} style={topicChipStyle}>
                 {topic}
               </span>
             ))}
           </div>
+          <p style={bodyTextStyle}>
+            Canonical labels normalize presentation only; recorded topics and Knowledge matching remain unchanged.
+          </p>
           <p style={bodyTextStyle}>{clean(currentBrief.why_it_matters)}</p>
           <p style={bodyTextStyle}>{clean(currentBrief.recommended_next_step)}</p>
         </SectionCard>

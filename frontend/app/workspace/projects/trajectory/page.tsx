@@ -10,6 +10,13 @@ import VerifiedInsightObjectPanel, { type VerifiedInsightObjectRow } from "@/com
 import { apiUrl } from "@/lib/api";
 import { adminFetchWithTimeout, isAbortError } from "@/lib/requestTimeout";
 
+import {
+  buildTrajectoryWindowDelta,
+  filterTrajectoryEventsForCurrentWindow,
+  type ComparableTrajectoryWindow,
+  type TrajectoryWindowMetric,
+} from "./trajectoryWindowDelta";
+
 type ProjectTrajectoryApiEvent = {
   id?: string;
   event_kind?: "review" | "calibration";
@@ -18,6 +25,9 @@ type ProjectTrajectoryApiEvent = {
   project_name?: string;
   signal_id?: string;
   signal_title?: string;
+  topics?: string[];
+  topic_display_labels?: string[];
+  topic_label_projections?: TopicLabelProjection[];
   outcome?: string;
   reason?: string;
   followup_result?: string;
@@ -52,6 +62,11 @@ type TrajectoryEventsResponse = {
     signal_type_mix?: Record<string, number>;
     event_kind_mix?: Record<string, number>;
     source_type_mix?: Record<string, number>;
+    topic_event_count?: number;
+    unclassified_topic_event_count?: number;
+    topic_mix?: CountItem[];
+    topic_variant_group_count?: number;
+    topic_variant_groups?: ApiTopicVariantGroup[];
     manual_intent_summary?: ManualIntentSummary;
     project_mix?: Array<{
       project_id?: string;
@@ -72,6 +87,25 @@ type CountItem = {
   count?: number;
 };
 
+type TopicLabelProjection = {
+  raw_label?: string;
+  canonical_label?: string;
+};
+
+type ApiTopicVariantGroup = {
+  canonical_label?: string;
+  event_count?: number;
+  project_count?: number;
+  variants?: CountItem[];
+};
+
+type TopicVariantGroup = {
+  canonicalLabel: string;
+  eventCount: number;
+  projectCount: number;
+  variants: CountItem[];
+};
+
 type ManualIntentSummary = {
   upload_reason_mix?: CountItem[];
   intended_use_mix?: CountItem[];
@@ -86,6 +120,9 @@ type TimelineEvent = {
   projectKey: string;
   projectLabel: string;
   signalId: string;
+  topics: string[];
+  topicDisplayLabels: string[];
+  topicLabelProjections: Array<{ rawLabel: string; canonicalLabel: string }>;
   outcome: string;
   sourceLabel: string;
   isManual: boolean;
@@ -111,7 +148,7 @@ type TimelineEvent = {
 };
 
 type TimelineFilter = "all" | "manual" | "risk" | "watch" | "action" | "review" | "calibration";
-type TimeWindowFilter = "all" | "7d" | "30d" | "90d";
+type TimeWindowFilter = "all" | ComparableTrajectoryWindow;
 type TimelineStage = "review" | "watch" | "action" | "completed" | "rejected" | "calibration";
 
 type ProjectSummary = {
@@ -122,7 +159,19 @@ type ProjectSummary = {
   riskCount: number;
   watchCount: number;
   actionCount: number;
+  topicCounts: Record<string, number>;
+  topicMix: CountItem[];
+  unclassifiedTopicCount: number;
   latestTimestamp: string;
+};
+
+type TopicTrendGroup = {
+  topic: string;
+  eventCount: number;
+  projectCount: number;
+  watchCount: number;
+  actionCount: number;
+  riskCount: number;
 };
 
 function formatLabel(value?: string) {
@@ -222,6 +271,20 @@ function toTimelineEvent(event: ProjectTrajectoryApiEvent): TimelineEvent {
     projectKey: event.project_id || "unknown",
     projectLabel: event.project_name || event.project_id || "Unknown project",
     signalId: event.signal_id || "",
+    topics: Array.isArray(event.topics) ? event.topics.map((topic) => String(topic || "").trim()).filter(Boolean) : [],
+    topicDisplayLabels: Array.isArray(event.topic_display_labels)
+      ? event.topic_display_labels.map((topic) => String(topic || "").trim()).filter(Boolean)
+      : Array.isArray(event.topics)
+        ? event.topics.map((topic) => String(topic || "").trim()).filter(Boolean)
+        : [],
+    topicLabelProjections: Array.isArray(event.topic_label_projections)
+      ? event.topic_label_projections
+          .map((projection) => ({
+            rawLabel: String(projection?.raw_label || "").trim(),
+            canonicalLabel: String(projection?.canonical_label || "").trim(),
+          }))
+          .filter((projection) => projection.rawLabel && projection.canonicalLabel)
+      : [],
     outcome: event.outcome || (eventKind === "calibration" ? "calibration_event" : "review_recorded"),
     sourceLabel: formatSourceLabel(isManual, event.source_type, event.manual_session_id),
     isManual,
@@ -477,21 +540,14 @@ function buildManualEventContribution(event: TimelineEvent) {
   return "This manual-source review adds human-selected context to the trajectory seed while staying inside the ordinary review path.";
 }
 
-function timeWindowDays(value: TimeWindowFilter) {
-  if (value === "7d") return 7;
-  if (value === "30d") return 30;
-  if (value === "90d") return 90;
-  return null;
+function filterByTimeWindow(events: TimelineEvent[], window: TimeWindowFilter, asOfMs: number) {
+  if (window === "all") return events;
+  return filterTrajectoryEventsForCurrentWindow(events, window, asOfMs);
 }
 
-function filterByTimeWindow(events: TimelineEvent[], window: TimeWindowFilter) {
-  const days = timeWindowDays(window);
-  if (!days) return events;
-  const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
-  return events.filter((event) => {
-    const timestamp = new Date(event.timestamp).getTime();
-    return !Number.isNaN(timestamp) && timestamp >= cutoff;
-  });
+function formatWindowDelta(value: number) {
+  if (value > 0) return `+${value}`;
+  return String(value);
 }
 
 function buildOpsSummary(events: TimelineEvent[]) {
@@ -543,6 +599,9 @@ function buildProjectSummaries(events: TimelineEvent[]): ProjectSummary[] {
       riskCount: 0,
       watchCount: 0,
       actionCount: 0,
+      topicCounts: {},
+      topicMix: [],
+      unclassifiedTopicCount: 0,
       latestTimestamp: event.timestamp,
     };
     existing.totalCount += 1;
@@ -552,13 +611,23 @@ function buildProjectSummaries(events: TimelineEvent[]): ProjectSummary[] {
     if (event.outcome.toLowerCase().includes("action") || event.outcome.toLowerCase() === "confirmed") {
       existing.actionCount += 1;
     }
+    if (event.topicDisplayLabels.length) {
+      for (const topic of new Set(event.topicDisplayLabels)) {
+        existing.topicCounts[topic] = (existing.topicCounts[topic] || 0) + 1;
+      }
+    } else {
+      existing.unclassifiedTopicCount += 1;
+    }
     if (new Date(event.timestamp).getTime() > new Date(existing.latestTimestamp).getTime()) {
       existing.latestTimestamp = event.timestamp;
       existing.projectLabel = event.projectLabel;
     }
     summaries.set(event.projectKey, existing);
   }
-  return Array.from(summaries.values()).sort((left, right) => {
+  return Array.from(summaries.values()).map((summary) => ({
+    ...summary,
+    topicMix: topCountItems(summary.topicCounts, 3),
+  })).sort((left, right) => {
     if (right.totalCount !== left.totalCount) return right.totalCount - left.totalCount;
     return new Date(right.latestTimestamp).getTime() - new Date(left.latestTimestamp).getTime();
   });
@@ -570,6 +639,89 @@ function countBy(events: TimelineEvent[], getKey: (event: TimelineEvent) => stri
     counts[key] = (counts[key] || 0) + 1;
     return counts;
   }, {});
+}
+
+function buildTopicTrendGroups(events: TimelineEvent[]): TopicTrendGroup[] {
+  const groups = new Map<string, {
+    eventCount: number;
+    projectKeys: Set<string>;
+    watchCount: number;
+    actionCount: number;
+    riskCount: number;
+  }>();
+
+  for (const event of events) {
+    const topics = event.topicDisplayLabels.length ? Array.from(new Set(event.topicDisplayLabels)) : ["Unclassified"];
+    for (const topic of topics) {
+      const group = groups.get(topic) || {
+        eventCount: 0,
+        projectKeys: new Set<string>(),
+        watchCount: 0,
+        actionCount: 0,
+        riskCount: 0,
+      };
+      group.eventCount += 1;
+      group.projectKeys.add(event.projectKey);
+      if (isWatchEvent(event)) group.watchCount += 1;
+      if (isActionEvent(event)) group.actionCount += 1;
+      if (hasRisk(event)) group.riskCount += 1;
+      groups.set(topic, group);
+    }
+  }
+
+  return Array.from(groups.entries())
+    .map(([topic, group]) => ({
+      topic,
+      eventCount: group.eventCount,
+      projectCount: group.projectKeys.size,
+      watchCount: group.watchCount,
+      actionCount: group.actionCount,
+      riskCount: group.riskCount,
+    }))
+    .sort((left, right) => {
+      if (right.eventCount !== left.eventCount) return right.eventCount - left.eventCount;
+      return left.topic.localeCompare(right.topic);
+    });
+}
+
+function buildTopicVariantGroups(events: TimelineEvent[]): TopicVariantGroup[] {
+  const groups = new Map<string, {
+    eventIds: Set<string>;
+    projectKeys: Set<string>;
+    rawCounts: Record<string, number>;
+  }>();
+
+  for (const event of events) {
+    for (const projection of event.topicLabelProjections) {
+      const group = groups.get(projection.canonicalLabel) || {
+        eventIds: new Set<string>(),
+        projectKeys: new Set<string>(),
+        rawCounts: {},
+      };
+      group.eventIds.add(`${event.kind}:${event.id}`);
+      group.projectKeys.add(event.projectKey);
+      group.rawCounts[projection.rawLabel] = (group.rawCounts[projection.rawLabel] || 0) + 1;
+      groups.set(projection.canonicalLabel, group);
+    }
+  }
+
+  return Array.from(groups.entries())
+    .filter(([, group]) => Object.keys(group.rawCounts).length > 1)
+    .map(([canonicalLabel, group]) => ({
+      canonicalLabel,
+      eventCount: group.eventIds.size,
+      projectCount: group.projectKeys.size,
+      variants: topCountItems(group.rawCounts, Object.keys(group.rawCounts).length),
+    }))
+    .sort((left, right) => {
+      if (right.eventCount !== left.eventCount) return right.eventCount - left.eventCount;
+      return left.canonicalLabel.localeCompare(right.canonicalLabel);
+    });
+}
+
+function formatTopicMix(items: CountItem[]) {
+  if (!items.length) return "No recorded topics";
+  return items.map((item) => `${item.value} ${item.count || 0}`).join(" / ");
 }
 
 function topCountItems(counts: Record<string, number>, limit = 5): CountItem[] {
@@ -650,6 +802,7 @@ export default function ProjectTrajectoryPage() {
   const initialProjectId = (searchParams.get("project_id") || "").trim();
   const initialSignalId = (searchParams.get("signal_id") || "").trim();
   const [trajectoryApiEvents, setTrajectoryApiEvents] = useState<ProjectTrajectoryApiEvent[]>([]);
+  const [timelineAsOfMs, setTimelineAsOfMs] = useState(() => Date.now());
   const [timeWindowFilter, setTimeWindowFilter] = useState<TimeWindowFilter>("all");
   const [timelineFilter, setTimelineFilter] = useState<TimelineFilter>("all");
   const [projectFilter, setProjectFilter] = useState(initialProjectId || "all");
@@ -680,6 +833,7 @@ export default function ProjectTrajectoryPage() {
 
         if (!cancelled) {
           setTrajectoryApiEvents(Array.isArray(data?.items) ? data.items : []);
+          setTimelineAsOfMs(Date.now());
         }
       } catch (error) {
         if (!cancelled) {
@@ -711,7 +865,10 @@ export default function ProjectTrajectoryPage() {
   }, [trajectoryApiEvents]);
 
   const foldedTimelineEvents = useMemo(() => foldAuditCalibrationEvents(timelineEvents), [timelineEvents]);
-  const timeFilteredEvents = useMemo(() => filterByTimeWindow(timelineEvents, timeWindowFilter), [timelineEvents, timeWindowFilter]);
+  const timeFilteredEvents = useMemo(
+    () => filterByTimeWindow(timelineEvents, timeWindowFilter, timelineAsOfMs),
+    [timelineEvents, timeWindowFilter, timelineAsOfMs]
+  );
   const foldedTimeFilteredEvents = useMemo(() => foldAuditCalibrationEvents(timeFilteredEvents), [timeFilteredEvents]);
   const projectSummaries = useMemo(() => buildProjectSummaries(foldedTimeFilteredEvents), [foldedTimeFilteredEvents]);
   const projectFilteredEvents = useMemo(() => {
@@ -722,6 +879,19 @@ export default function ProjectTrajectoryPage() {
     });
   }, [timeFilteredEvents, projectFilter, signalFilter]);
   const foldedProjectFilteredEvents = useMemo(() => foldAuditCalibrationEvents(projectFilteredEvents), [projectFilteredEvents]);
+  const foldedScopeEvents = useMemo(() => {
+    return foldAuditCalibrationEvents(
+      timelineEvents.filter((event) => {
+        if (projectFilter !== "all" && event.projectKey !== projectFilter) return false;
+        if (signalFilter && event.signalId !== signalFilter) return false;
+        return true;
+      })
+    );
+  }, [timelineEvents, projectFilter, signalFilter]);
+  const activeWindowDelta = useMemo(() => {
+    if (timeWindowFilter === "all") return null;
+    return buildTrajectoryWindowDelta(foldedScopeEvents, timeWindowFilter, timelineAsOfMs);
+  }, [foldedScopeEvents, timeWindowFilter, timelineAsOfMs]);
   const projectScopedSummary = useMemo(() => buildOpsSummary(foldedProjectFilteredEvents), [foldedProjectFilteredEvents]);
   const opsSummary = useMemo(() => buildOpsSummary(foldedTimelineEvents), [foldedTimelineEvents]);
   const activeOpsSummary = projectFilter === "all" ? opsSummary : projectScopedSummary;
@@ -732,6 +902,8 @@ export default function ProjectTrajectoryPage() {
   const displayRiskMix = countBy(foldedProjectFilteredEvents, (event) => event.riskLevel);
   const displaySignalTypeMix = countBy(foldedProjectFilteredEvents, (event) => event.trajectorySignalType);
   const manualIntentSummary = buildManualIntentSummary(foldedProjectFilteredEvents);
+  const topicTrendGroups = useMemo(() => buildTopicTrendGroups(foldedProjectFilteredEvents), [foldedProjectFilteredEvents]);
+  const topicVariantGroups = useMemo(() => buildTopicVariantGroups(foldedProjectFilteredEvents), [foldedProjectFilteredEvents]);
   const visibleEvents = useMemo(() => {
     if (timelineFilter === "calibration") return projectFilteredEvents.filter((event) => event.kind === "calibration");
     if (timelineFilter === "manual") return foldedProjectFilteredEvents.filter((event) => event.isManual);
@@ -752,9 +924,9 @@ export default function ProjectTrajectoryPage() {
   ];
   const timeWindowOptions: Array<{ value: TimeWindowFilter; label: string; count: number }> = [
     { value: "all", label: "All Time", count: foldedTimelineEvents.length },
-    { value: "7d", label: "7d", count: foldAuditCalibrationEvents(filterByTimeWindow(timelineEvents, "7d")).length },
-    { value: "30d", label: "30d", count: foldAuditCalibrationEvents(filterByTimeWindow(timelineEvents, "30d")).length },
-    { value: "90d", label: "90d", count: foldAuditCalibrationEvents(filterByTimeWindow(timelineEvents, "90d")).length },
+    { value: "7d", label: "7d", count: foldAuditCalibrationEvents(filterByTimeWindow(timelineEvents, "7d", timelineAsOfMs)).length },
+    { value: "30d", label: "30d", count: foldAuditCalibrationEvents(filterByTimeWindow(timelineEvents, "30d", timelineAsOfMs)).length },
+    { value: "90d", label: "90d", count: foldAuditCalibrationEvents(filterByTimeWindow(timelineEvents, "90d", timelineAsOfMs)).length },
   ];
   const activeProjectLabel = projectFilter === "all"
     ? "All projects"
@@ -820,6 +992,92 @@ export default function ProjectTrajectoryPage() {
                 <SummaryMetric label="Action" value={actionCount} />
                 <SummaryMetric label="Risk Signals" value={riskCount} />
               </div>
+              <div style={windowDeltaPanelStyle}>
+                <div style={windowDeltaHeaderStyle}>
+                  <div>
+                    <span style={summaryLabelStyle}>Window Change</span>
+                    <strong style={windowDeltaTitleStyle}>
+                      {activeWindowDelta
+                        ? `Current ${activeWindowDelta.windowDays}d vs previous ${activeWindowDelta.windowDays}d`
+                        : "Select 7d, 30d, or 90d to compare equal windows"}
+                    </strong>
+                  </div>
+                  {activeWindowDelta ? (
+                    <span style={windowDeltaBaselineStyle}>
+                      {activeWindowDelta.hasPreviousActivity ? "Previous window available" : "No previous-window activity"}
+                    </span>
+                  ) : null}
+                </div>
+                {activeWindowDelta ? (
+                  <div style={windowDeltaGridStyle}>
+                    {([
+                      ["events", "Events"],
+                      ["watch", "Watch"],
+                      ["action", "Action"],
+                      ["risk", "Risk"],
+                    ] as Array<[TrajectoryWindowMetric, string]>).map(([metric, label]) => (
+                      <div key={metric} style={windowDeltaMetricStyle}>
+                        <span style={summaryLabelStyle}>{label}</span>
+                        <strong>{activeWindowDelta.current[metric]}</strong>
+                        <span>
+                          Previous {activeWindowDelta.previous[metric]} / Change {formatWindowDelta(activeWindowDelta.delta[metric])}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+                <span style={windowDeltaBoundaryStyle}>
+                  Activity counts only. A change does not indicate stronger evidence, higher verification, or Action eligibility.
+                </span>
+              </div>
+              <div style={topicTrendPanelStyle}>
+                <div>
+                  <span style={summaryLabelStyle}>Project / Topic Trends</span>
+                  <strong style={topicTrendTitleStyle}>Recorded topic concentration in the current scope</strong>
+                </div>
+                {topicTrendGroups.length ? (
+                  <div style={topicTrendGridStyle}>
+                    {topicTrendGroups.slice(0, 8).map((group) => (
+                      <div key={group.topic} style={topicTrendCardStyle}>
+                        <span style={summaryLabelStyle}>{group.topic}</span>
+                        <strong>{group.eventCount} event(s)</strong>
+                        <span>
+                          Projects {group.projectCount} / Watch {group.watchCount} / Action {group.actionCount} / Risk {group.riskCount}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <span style={topicTrendEmptyStyle}>No reviewed events are available for topic grouping in this scope.</span>
+                )}
+                <span style={topicTrendBoundaryStyle}>
+                  Canonical labels normalize presentation only; recorded topic snapshots remain unchanged. Unclassified means no topic was stored;
+                  titles are not used to infer one. One event may appear in multiple topic groups. Counts do not prove momentum, evidence strength,
+                  or Action eligibility.
+                </span>
+                <details style={mixDetailsStyle}>
+                  <summary style={mixSummaryStyle}>Topic Variance ({topicVariantGroups.length})</summary>
+                  <div style={topicVarianceContentStyle}>
+                    {topicVariantGroups.length ? (
+                      <div style={topicTrendGridStyle}>
+                        {topicVariantGroups.map((group) => (
+                          <div key={group.canonicalLabel} style={topicTrendCardStyle}>
+                            <span style={summaryLabelStyle}>{group.canonicalLabel}</span>
+                            <strong>{group.eventCount} event(s) / {group.projectCount} project(s)</strong>
+                            <span>{group.variants.map((variant) => `${variant.value} ${variant.count || 0}`).join(" / ")}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <span style={topicTrendEmptyStyle}>No multi-label formatting variance is recorded in the current scope.</span>
+                    )}
+                    <span style={topicTrendBoundaryStyle}>
+                      Diagnostic only: these are real recorded labels grouped by the existing canonical display rule. This does not approve new semantic
+                      aliases, rewrite records, change Knowledge matching, or affect verification and Action eligibility.
+                    </span>
+                  </div>
+                </details>
+              </div>
               <div style={opsInterpretationStyle}>
                 <div style={opsInterpretationItemStyle}>
                   <span style={summaryLabelStyle}>Achieved</span>
@@ -842,6 +1100,10 @@ export default function ProjectTrajectoryPage() {
                       <strong style={manualContributionTitleStyle}>
                         User-selected material is contributing to trajectory movement.
                       </strong>
+                      <span style={manualContributionBoundaryStyle}>
+                        Intent context only: it explains why the material was uploaded and how it was meant to be used.
+                        It is not evidence and does not change verification or Action eligibility.
+                      </span>
                     </div>
                     <div style={manualContributionMetricRowStyle}>
                       <span>Events {manualTrajectoryContribution.manualEvents}</span>
@@ -962,6 +1224,10 @@ export default function ProjectTrajectoryPage() {
                       <span style={projectSummaryMetaStyle}>
                         Manual {project.manualCount} / Risk {project.riskCount} / Watch {project.watchCount} / Action {project.actionCount}
                       </span>
+                      <span style={projectSummaryMetaStyle}>
+                        Topics {formatTopicMix(project.topicMix)}
+                        {project.unclassifiedTopicCount ? ` / Unclassified ${project.unclassifiedTopicCount}` : ""}
+                      </span>
                     </button>
                   ))}
                 </div>
@@ -1059,6 +1325,9 @@ export default function ProjectTrajectoryPage() {
                         <span style={hasRisk(event) ? riskChipStyle : chipStyle}>Risk {formatLabel(event.riskLevel)}</span>
                         <span style={chipStyle}>Stage {formatLabel(getTrajectoryStage(event))}</span>
                         <span style={chipStyle}>{formatLabel(event.trajectorySignalType)}</span>
+                        {event.topicDisplayLabels.slice(0, 3).map((topic) => (
+                          <span key={topic} style={chipStyle}>Topic {topic}</span>
+                        ))}
                         {event.isManual ? <span style={chipStyle}>Layer {formatLabel(event.cognitiveLayer)}</span> : null}
                         {event.auditEventCount > 0 ? <span style={chipStyle}>Audit Events {event.auditEventCount}</span> : null}
                         <span style={chipStyle}>Unsupported {event.unsupportedCount}</span>
@@ -1277,6 +1546,122 @@ const metricLabelStyle = {
   color: "var(--app-text-muted)",
   fontSize: "13px",
   fontWeight: 500,
+} as const;
+
+const windowDeltaPanelStyle = {
+  border: "1px solid var(--app-info-border)",
+  borderRadius: "12px",
+  background: "var(--app-info-bg)",
+  color: "var(--app-info-fg)",
+  padding: "14px",
+  display: "grid",
+  gap: "12px",
+} as const;
+
+const windowDeltaHeaderStyle = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: "12px",
+  flexWrap: "wrap" as const,
+} as const;
+
+const windowDeltaTitleStyle = {
+  display: "block",
+  marginTop: "4px",
+  color: "var(--app-info-fg)",
+  fontSize: "15px",
+  lineHeight: "1.35",
+} as const;
+
+const windowDeltaBaselineStyle = {
+  border: "1px solid var(--app-info-border)",
+  borderRadius: "999px",
+  background: "var(--app-surface-bg)",
+  color: "var(--app-info-fg)",
+  padding: "6px 9px",
+  fontSize: "12px",
+  fontWeight: 700,
+} as const;
+
+const windowDeltaGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+  gap: "10px",
+} as const;
+
+const windowDeltaMetricStyle = {
+  border: "1px solid var(--app-info-border)",
+  borderRadius: "8px",
+  background: "var(--app-surface-bg)",
+  color: "var(--app-text-muted)",
+  padding: "10px 12px",
+  display: "grid",
+  gap: "5px",
+  fontSize: "12px",
+  lineHeight: "1.45",
+} as const;
+
+const windowDeltaBoundaryStyle = {
+  color: "var(--app-text-muted)",
+  fontSize: "12px",
+  lineHeight: "1.5",
+} as const;
+
+const topicTrendPanelStyle = {
+  border: "1px solid var(--app-surface-border)",
+  borderRadius: "12px",
+  background: "var(--app-surface-muted-bg)",
+  color: "var(--app-text-muted)",
+  padding: "14px",
+  display: "grid",
+  gap: "12px",
+} as const;
+
+const topicTrendTitleStyle = {
+  display: "block",
+  marginTop: "4px",
+  color: "var(--app-text-strong)",
+  fontSize: "15px",
+  lineHeight: "1.35",
+} as const;
+
+const topicTrendGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
+  gap: "10px",
+} as const;
+
+const topicTrendCardStyle = {
+  border: "1px solid var(--app-surface-border)",
+  borderRadius: "8px",
+  background: "var(--app-surface-bg)",
+  color: "var(--app-text-muted)",
+  padding: "10px 12px",
+  display: "grid",
+  gap: "5px",
+  fontSize: "12px",
+  lineHeight: "1.45",
+} as const;
+
+const topicTrendEmptyStyle = {
+  color: "var(--app-text-muted)",
+  fontSize: "13px",
+  lineHeight: "1.5",
+} as const;
+
+const topicTrendBoundaryStyle = {
+  borderLeft: "3px solid var(--app-surface-strong-border)",
+  color: "var(--app-text-muted)",
+  paddingLeft: "10px",
+  fontSize: "12px",
+  lineHeight: "1.5",
+} as const;
+
+const topicVarianceContentStyle = {
+  marginTop: "12px",
+  display: "grid",
+  gap: "10px",
 } as const;
 
 const summaryLabelStyle = {
@@ -1613,6 +1998,14 @@ const manualContributionTitleStyle = {
   color: "var(--app-success-fg)",
   fontSize: "15px",
   lineHeight: "1.35",
+} as const;
+
+const manualContributionBoundaryStyle = {
+  display: "block",
+  marginTop: "6px",
+  color: "var(--app-text-muted)",
+  fontSize: "12px",
+  lineHeight: "1.5",
 } as const;
 
 const manualContributionMetricRowStyle = {

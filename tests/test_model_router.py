@@ -36,7 +36,7 @@ class ModelRouterTests(unittest.TestCase):
         self.assertEqual(route.provider, PROVIDER_OPENAI)
         self.assertEqual(route.model, "fast-model")
 
-    def test_structure_routes_to_tier_2_with_anthropic_default(self):
+    def test_structure_routes_to_tier_2_with_anthropic_override(self):
         with patch.dict(
             "os.environ",
             {
@@ -44,6 +44,7 @@ class ModelRouterTests(unittest.TestCase):
                 "OPENAI_MODEL": "structured-model",
                 "ANTHROPIC_MODEL": "claude-sonnet-4-6",
                 "ANTHROPIC_API_KEY": "test-key",
+                "MODEL_ROUTER_ANALYSIS_PROVIDER": "anthropic",
             },
             clear=False,
         ):
@@ -53,13 +54,14 @@ class ModelRouterTests(unittest.TestCase):
         self.assertEqual(route.provider, PROVIDER_ANTHROPIC)
         self.assertEqual(route.model, "claude-sonnet-4-6")
 
-    def test_strategy_prefers_anthropic_when_key_exists(self):
+    def test_strategy_routes_to_anthropic_with_tier_3_override(self):
         with patch.dict(
             "os.environ",
             {
                 "LLM_MODEL": "baseline-model",
                 "ANTHROPIC_MODEL": "strategic-model",
                 "ANTHROPIC_API_KEY": "test-key",
+                "MODEL_ROUTER_TIER3_PROVIDER": "anthropic",
             },
             clear=False,
         ):

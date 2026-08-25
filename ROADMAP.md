@@ -327,10 +327,11 @@ Adjacent concepts from AI Systems Lab can inform AI Radar, but this repository s
 
 Current useful next slices:
 
-- Today Overview Product Contract: specify a read-only governed daily decision
-  surface, navigation compression, and an existing-data reuse proof before any
-  implementation; do not add a Digest engine, Development domain model,
-  aggregate verification status, or inferred review eligibility
+- Today Overview runtime validation: the read-only, fail-closed five-state
+  surface is implemented at `/dashboard`; validate its authenticated live-data
+  states before taking the separate navigation-compression slice, without
+  adding a Digest engine, Development domain model, aggregate verification
+  status, or inferred review eligibility
 - Project Learning Profile P1: summarize ReviewRecord / CalibrationEvent
   outcomes into project-level learning context for future judgment
 - deeper repo scan: move beyond light README / ROADMAP / manifest context only

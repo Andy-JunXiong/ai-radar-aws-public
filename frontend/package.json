@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "test:guidance": "node scripts/test-operator-guidance-contract.mjs",
+    "test:today-overview": "node scripts/test-today-overview-contract.mjs",
     "test:public-routes": "node scripts/test-public-route-contract.mjs"
   },
   "dependencies": {

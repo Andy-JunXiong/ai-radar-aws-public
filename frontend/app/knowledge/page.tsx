@@ -33,6 +33,7 @@ type ConvergenceBrief = {
   confidence?: string;
   score?: number;
   shared_topics?: string[];
+  topic_display_labels?: string[];
   agent_watch_item?: Highlight;
   friction_item?: Highlight;
   brief?: string;
@@ -431,6 +432,7 @@ export default function KnowledgePage() {
         body: JSON.stringify({
           signal_id: clusterId,
           signal_title: `Knowledge Brief: ${clean(brief.label) || "Supply / demand convergence"}`,
+          topics: brief.shared_topics?.filter(Boolean) || [],
           signal_summary: clean(brief.brief),
           why_it_matters: clean(brief.why_it_matters),
           relevance_to_projects: takeawayMap,
@@ -834,6 +836,11 @@ function formatCandidateStatus(items: ExistingCandidate[]) {
     .join(", ");
 }
 
+function getTopicDisplayLabels(brief: ConvergenceBrief) {
+  const displayLabels = brief.topic_display_labels?.filter(Boolean) || [];
+  return displayLabels.length ? displayLabels : brief.shared_topics?.filter(Boolean) || [];
+}
+
 function shortBriefId(value?: string) {
   const id = clean(value);
   if (!id) return "";
@@ -1227,7 +1234,7 @@ function ConvergenceBriefCard({
 }) {
   const agentHref = detailHref(brief.agent_watch_item, "/agent-watch/detail");
   const frictionHref = detailHref(brief.friction_item, "/friction-signals/detail");
-  const sharedTopics = brief.shared_topics?.filter(Boolean) || [];
+  const sharedTopics = getTopicDisplayLabels(brief);
   const matchedProjects = brief.project_relevance?.matched_projects || [];
   const evidence = brief.evidence_profile;
   const quality = buildKnowledgeQuality(brief);

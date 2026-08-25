@@ -101,6 +101,7 @@ class StrategicSynthesisServiceTests(unittest.TestCase):
         self.assertTrue(brief["cluster_id"].startswith("knowledge-convergence-"))
         self.assertEqual(brief["action_gate"], "human_review_required")
         self.assertIn("evaluation", brief["shared_topics"])
+        self.assertIn("Evaluation", brief["topic_display_labels"])
         self.assertEqual(brief["agent_watch_item"]["entity_id"], "https://example.com/agent")
         self.assertEqual(brief["friction_item"]["entity_id"], "https://example.com/friction")
         self.assertEqual(brief["review_readiness"]["status"], "ready_for_project_review")

@@ -69,6 +69,7 @@ from signal_collectors.producthunt_agent_collector import (
     collect_producthunt_agent_signals,
     save as save_producthunt_agent_signals,
 )
+from signal_collectors.collection_coverage import CollectionCoverageTracker
 from signal_collectors.merge_signals import main as run_merge_signals
 from app.intelligence.processors.agent_signal_processor import (
     collect_normalized_hackernews_agent_signals,
@@ -105,6 +106,17 @@ INTELLIGENCE_OUTPUT_DIR = OUTPUT_DIR / "intelligence"
 MAX_SOURCE_EXCERPT_CHARS = 1200
 CURRENT_PIPELINE_RUN_ID: str | None = None
 ARTIFACT_WRITTEN_COUNT = 0
+COLLECTOR_STEP_IDS = (
+    "rss_collector",
+    "official_collector",
+    "github_agent_collector",
+    "hackernews_agent_collector",
+    "producthunt_agent_collector",
+    "github_friction_collector",
+    "hackernews_friction_collector",
+    "merge_signals",
+)
+CURRENT_COLLECTOR_ATTEMPTS: list[str] = []
 TRUE_ENV_VALUES = {"1", "true", "yes", "on"}
 
 S3_BUCKET_NAME = os.getenv("AI_RADAR_S3_BUCKET") or os.getenv(
@@ -288,22 +300,45 @@ def _record_collector_result(
     error_count: int = 0,
     retry_count: int = 0,
     error_type: str | None = None,
+    coverage: dict | None = None,
 ) -> None:
-    _safe_record_collector_run(
-        {
-            "run_id": CURRENT_PIPELINE_RUN_ID,
-            "collector_name": collector_name,
-            "started_at": datetime.now(settings.timezone).isoformat(),
-            "duration_seconds": _duration_seconds(started_at),
-            "success": success,
-            "items_fetched": items_fetched,
-            "items_normalized": items_normalized,
-            "items_written": items_written,
-            "error_count": error_count,
-            "retry_count": retry_count,
-            "error_type": error_type,
-        }
-    )
+    event = {
+        "run_id": CURRENT_PIPELINE_RUN_ID,
+        "collector_name": collector_name,
+        "started_at": datetime.now(settings.timezone).isoformat(),
+        "duration_seconds": _duration_seconds(started_at),
+        "success": success,
+        "items_fetched": items_fetched,
+        "items_normalized": items_normalized,
+        "items_written": items_written,
+        "error_count": error_count,
+        "retry_count": retry_count,
+        "error_type": error_type,
+    }
+    if isinstance(coverage, dict):
+        event["coverage"] = coverage
+    _safe_record_collector_run(event)
+
+
+def _mark_collector_step_attempted(collector_name: str) -> None:
+    if collector_name not in CURRENT_COLLECTOR_ATTEMPTS:
+        CURRENT_COLLECTOR_ATTEMPTS.append(collector_name)
+
+
+def _collector_plan_snapshot() -> dict:
+    attempted_step_ids = [
+        step_id for step_id in COLLECTOR_STEP_IDS if step_id in CURRENT_COLLECTOR_ATTEMPTS
+    ]
+    missing_step_ids = [
+        step_id for step_id in COLLECTOR_STEP_IDS if step_id not in CURRENT_COLLECTOR_ATTEMPTS
+    ]
+    return {
+        "plan_version": "pipeline-collector-plan-v1",
+        "expected_step_ids": list(COLLECTOR_STEP_IDS),
+        "attempted_step_ids": attempted_step_ids,
+        "missing_step_ids": missing_step_ids,
+        "complete": not missing_step_ids,
+    }
 
 
 def _run_collector_step(
@@ -313,6 +348,7 @@ def _run_collector_step(
     normalize_fn=None,
 ):
     started_at = time.perf_counter()
+    _mark_collector_step_attempted(collector_name)
     try:
         items = collect_fn()
         if save_fn:
@@ -329,6 +365,7 @@ def _run_collector_step(
             items_fetched=items_fetched,
             items_normalized=items_normalized,
             items_written=items_fetched,
+            coverage=getattr(items, "coverage", None),
         )
         return items, normalized_items
     except Exception as exc:
@@ -1337,6 +1374,7 @@ def run_collectors() -> None:
     7. manual signals
     8. merge_signals.py
     """
+    CURRENT_COLLECTOR_ATTEMPTS.clear()
     print("=== STEP 1: Collect RSS signals ===")
     rss_signals, _ = _run_collector_step(
         "rss_collector",
@@ -1405,20 +1443,31 @@ def run_collectors() -> None:
 
     print("=== STEP 5: Merge signals ===")
     merge_started_at = time.perf_counter()
+    merge_coverage = CollectionCoverageTracker(
+        unit_type="step",
+        expected_count=1,
+        unit_prefix="merge_step",
+    )
+    merge_coverage.attempt(0)
+    _mark_collector_step_attempted("merge_signals")
     try:
         run_merge_signals()
+        merge_coverage.succeed(0, item_count=0)
         _record_collector_result(
             collector_name="merge_signals",
             started_at=merge_started_at,
             success=True,
+            coverage=merge_coverage.to_dict(),
         )
     except Exception as exc:
+        merge_coverage.fail(0, reason_code="merge_error")
         _record_collector_result(
             collector_name="merge_signals",
             started_at=merge_started_at,
             success=False,
             error_count=1,
             error_type=type(exc).__name__,
+            coverage=merge_coverage.to_dict(),
         )
         raise
     print("Merged signals file refreshed.")
@@ -2912,6 +2961,7 @@ def main() -> None:
     run_id = uuid.uuid4().hex
     CURRENT_PIPELINE_RUN_ID = run_id
     ARTIFACT_WRITTEN_COUNT = 0
+    CURRENT_COLLECTOR_ATTEMPTS.clear()
     started_perf = time.perf_counter()
     started_at = datetime.now(settings.timezone)
     today = started_at.strftime("%Y-%m-%d")
@@ -2931,6 +2981,7 @@ def main() -> None:
                 "error_count": 1,
                 "error_type": type(exc).__name__,
                 "artifact_written_count": ARTIFACT_WRITTEN_COUNT,
+                "collector_plan": _collector_plan_snapshot(),
             }
         )
         _safe_write_daily_metrics_summary(today)
@@ -2948,6 +2999,7 @@ def main() -> None:
             "success": True,
             "error_count": 0,
             "artifact_written_count": ARTIFACT_WRITTEN_COUNT,
+            "collector_plan": _collector_plan_snapshot(),
         }
     )
     _safe_write_daily_metrics_summary(today)

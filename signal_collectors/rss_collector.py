@@ -7,6 +7,12 @@ from datetime import datetime, timezone, timedelta
 import boto3
 from dotenv import load_dotenv
 
+from signal_collectors.collection_coverage import (
+    CollectionCoverageTracker,
+    failure_reason_code,
+    with_collection_coverage,
+)
+
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 OUTPUT_FILE = BASE_DIR / "data" / "output" / "rss_signals.json"
@@ -250,10 +256,17 @@ def collect_rss_signals() -> list[dict]:
 
     all_signals = []
     effective_sources = get_effective_rss_sources()
+    coverage = CollectionCoverageTracker(
+        unit_type="source",
+        expected_count=len(effective_sources),
+        unit_prefix="rss_source",
+    )
 
     print(f"[rss] effective source count: {len(effective_sources)}")
 
-    for source_name, feed_url in effective_sources.items():
+    for source_index, (source_name, feed_url) in enumerate(effective_sources.items()):
+
+        coverage.attempt(source_index)
 
         print(f"[rss] collecting from {source_name} -> {feed_url}")
 
@@ -262,6 +275,16 @@ def collect_rss_signals() -> list[dict]:
             feed = feedparser.parse(feed_url)
 
             entries = getattr(feed, "entries", [])
+
+            status = getattr(feed, "status", None)
+            if isinstance(status, int) and status >= 400:
+                coverage.fail(source_index, reason_code="http_error")
+                print(f"[rss] source request failed with HTTP status {status}")
+                continue
+            if getattr(feed, "bozo", False) and not entries:
+                coverage.fail(source_index, reason_code="parse_error")
+                print(f"[rss] source returned an unreadable feed")
+                continue
 
             print(f"[rss] {source_name} -> {len(entries)} entries")
 
@@ -282,12 +305,14 @@ def collect_rss_signals() -> list[dict]:
                 fresh_count += 1
 
             print(f"[rss] {source_name} -> {fresh_count} fresh signals")
+            coverage.succeed(source_index, item_count=fresh_count)
 
         except Exception as e:
 
             print(f"[rss] failed for {source_name}: {e}")
+            coverage.fail(source_index, reason_code=failure_reason_code(e))
 
-    return all_signals
+    return with_collection_coverage(all_signals, coverage)
 
 
 def save_signals(signals: list[dict]):

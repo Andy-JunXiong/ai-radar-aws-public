@@ -7,6 +7,13 @@ from urllib import error, request
 
 from dotenv import load_dotenv
 
+from signal_collectors.collection_coverage import (
+    CollectionCoverageTracker,
+    InvalidCollectionResponse,
+    failure_reason_code,
+    with_collection_coverage,
+)
+
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 OUTPUT_FILE = BASE_DIR / "data" / "output" / "producthunt_agent_signals.json"
@@ -184,19 +191,32 @@ def _normalize_post(post: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def collect_producthunt_agent_signals() -> list[dict[str, Any]]:
+    coverage = CollectionCoverageTracker(
+        unit_type="request",
+        expected_count=1,
+        unit_prefix="producthunt_request",
+    )
+    coverage.attempt(0)
     try:
         payload = _product_hunt_request()
+        data = payload.get("data") if isinstance(payload, dict) else None
+        posts = data.get("posts") if isinstance(data, dict) else None
+        edges = posts.get("edges") if isinstance(posts, dict) else None
+        if not isinstance(edges, list):
+            raise InvalidCollectionResponse(
+                "Product Hunt response did not contain a posts edge list"
+            )
     except error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="ignore")
         print(f"[producthunt_agent] request failed: {exc.code} {detail}")
-        return []
+        coverage.fail(0, reason_code="http_error")
+        return with_collection_coverage([], coverage)
     except Exception as exc:
         print(f"[producthunt_agent] request failed: {exc}")
-        return []
+        coverage.fail(0, reason_code=failure_reason_code(exc))
+        return with_collection_coverage([], coverage)
 
-    data = payload.get("data") if isinstance(payload, dict) else {}
-    posts = data.get("posts") if isinstance(data, dict) else {}
-    edges = posts.get("edges") if isinstance(posts, dict) else []
+    coverage.succeed(0, item_count=len(edges))
     signals: list[dict[str, Any]] = []
     seen_urls: set[str] = set()
 
@@ -216,12 +236,15 @@ def collect_producthunt_agent_signals() -> list[dict[str, Any]]:
         seen_urls.add(dedupe_key)
         signals.append(normalized)
 
-    return sorted(
-        signals,
-        key=lambda item: (
-            -int(((item.get("metadata") or {}) if isinstance(item.get("metadata"), dict) else {}).get("product_hunt_votes") or 0),
-            str(item.get("published_at") or ""),
+    return with_collection_coverage(
+        sorted(
+            signals,
+            key=lambda item: (
+                -int(((item.get("metadata") or {}) if isinstance(item.get("metadata"), dict) else {}).get("product_hunt_votes") or 0),
+                str(item.get("published_at") or ""),
+            ),
         ),
+        coverage,
     )
 
 

@@ -138,7 +138,7 @@ class ProjectRepoSnapshotServiceTests(unittest.TestCase):
             {
                 "status": "fresh",
                 "repo": "Andy-JunXiong/ai-radar-aws",
-                "scanned_at": "2026-05-26T00:00:00+00:00",
+                "scanned_at": service._utc_now_iso(),
             },
         )
 
@@ -157,7 +157,7 @@ class ProjectRepoSnapshotServiceTests(unittest.TestCase):
             {
                 "status": "failed",
                 "repo": "Andy-JunXiong/ai-radar-aws",
-                "scanned_at": "2026-05-26T00:00:00+00:00",
+                "scanned_at": service._utc_now_iso(),
                 "summary": "# AI Radar Docs",
                 "readme_found": True,
                 "top_level_tree": [{"name": "backend", "path": "backend", "type": "dir"}],

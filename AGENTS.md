@@ -32,6 +32,15 @@ documentation without private runtime data.
 - If a file's publication safety is uncertain, exclude it and request maintainer
   review. Follow `docs/governance/public-repository-sync.md` for the detailed
   synchronization procedure.
+- Derive candidates from the approved committed private release range, public
+  safe roots, and mandatory exclusions. Do not reconstruct the candidate set
+  through repository-wide inspection.
+- Do not transport Git patch bytes through a PowerShell text pipeline. Use
+  Git-native commits/merges or a binary-safe patch file with three-way conflict
+  detection.
+- After an isolated private release, fast-forward a clean primary `main` with
+  normal Git operations. If the primary worktree is dirty, leave its branch,
+  index, and files unchanged and report the temporary divergence.
 
 ## Feature And Architecture Origin
 
@@ -55,6 +64,14 @@ publish private assessments and cognitive logs.
 4. Run targeted tests and relevant contract checks.
 5. Report changed files, validation, limitations, and any manual testing still
    required.
+
+Validation is proportional to effective behavior and risk. Reuse traceable
+successful evidence through status, handoff, and release bookkeeping when no
+executable code, configuration, generated artifact, schema, runtime contract,
+or behaviorally coupled dependency changed. After reconciliation, consider
+conflicts, shared dependencies, API/schema/invariant/runtime coupling, and
+behavioral risk in addition to path overlap. Use full regression when the
+affected behavior is cross-cutting, high-risk, or cannot be isolated.
 
 Public contributors should start with `README.md`, `ROADMAP.md`, and
 `docs/README.md`.

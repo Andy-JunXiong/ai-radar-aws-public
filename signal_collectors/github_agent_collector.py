@@ -7,6 +7,13 @@ from urllib import error, parse, request
 
 from dotenv import load_dotenv
 
+from signal_collectors.collection_coverage import (
+    CollectionCoverageTracker,
+    InvalidCollectionResponse,
+    failure_reason_code,
+    with_collection_coverage,
+)
+
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 OUTPUT_FILE = BASE_DIR / "data" / "output" / "github_agent_signals.json"
@@ -98,7 +105,9 @@ def _search_repositories(search_term: str) -> list[dict[str, Any]]:
         f"&sort=updated&order=desc&per_page={GITHUB_PER_QUERY_LIMIT}"
     )
     payload = _github_request(path)
-    items = payload.get("items", []) if isinstance(payload, dict) else []
+    if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
+        raise InvalidCollectionResponse("GitHub response did not contain an items list")
+    items = payload["items"]
     return [item for item in items if isinstance(item, dict)]
 
 
@@ -159,20 +168,29 @@ def _normalize_repo_signal(repo: dict[str, Any], matched_terms: list[str]) -> di
 def collect_github_agent_signals() -> list[dict[str, Any]]:
     signals: list[dict[str, Any]] = []
     seen_repos: set[str] = set()
+    coverage = CollectionCoverageTracker(
+        unit_type="query",
+        expected_count=len(GITHUB_AGENT_SEARCH_QUERIES),
+        unit_prefix="github_agent_query",
+    )
 
-    for search_term in GITHUB_AGENT_SEARCH_QUERIES:
+    for query_index, search_term in enumerate(GITHUB_AGENT_SEARCH_QUERIES):
+        coverage.attempt(query_index)
         print(f"[github_agent] searching GitHub for {search_term}")
         try:
             repositories = _search_repositories(search_term)
         except error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="ignore")
             print(f"[github_agent] search failed for {search_term}: {exc.code} {detail}")
+            coverage.fail(query_index, reason_code="http_error")
             continue
         except Exception as exc:
             print(f"[github_agent] search failed for {search_term}: {exc}")
+            coverage.fail(query_index, reason_code=failure_reason_code(exc))
             continue
 
         print(f"[github_agent] {search_term} -> {len(repositories)} repositories")
+        coverage.succeed(query_index, item_count=len(repositories))
 
         for repo in repositories:
             full_name = str(repo.get("full_name") or "").strip().lower()
@@ -192,12 +210,15 @@ def collect_github_agent_signals() -> list[dict[str, Any]]:
             seen_repos.add(full_name)
             signals.append(normalized)
 
-    return sorted(
-        signals,
-        key=lambda item: (
-            -int(((item.get("metadata") or {}) if isinstance(item.get("metadata"), dict) else {}).get("repo_stars") or 0),
-            str(item.get("published_at") or ""),
+    return with_collection_coverage(
+        sorted(
+            signals,
+            key=lambda item: (
+                -int(((item.get("metadata") or {}) if isinstance(item.get("metadata"), dict) else {}).get("repo_stars") or 0),
+                str(item.get("published_at") or ""),
+            ),
         ),
+        coverage,
     )
 
 

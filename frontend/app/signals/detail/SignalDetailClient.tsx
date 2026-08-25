@@ -5056,6 +5056,7 @@ Please generate a reflection draft that feels personal and specific, not generic
           final_takeaway_id: finalTakeawayId,
           signal_id: finalTakeawaySignalId,
           signal_title: displayTitle,
+          topics: insight.topic ? [insight.topic] : [],
           signal_summary: cleanedDisplaySummary,
           why_it_matters: cleanedWhyItMatters,
           relevance_to_projects: cleanedProjectRelevance,

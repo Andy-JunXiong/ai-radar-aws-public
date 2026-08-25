@@ -17,6 +17,10 @@ for module_name in list(sys.modules):
 import app.main_summary_v2 as pipeline  # noqa: E402
 from backend.app.services import metrics_event_service, metrics_summary_service  # noqa: E402
 from app.models import Insight, Signal  # noqa: E402
+from signal_collectors.collection_coverage import (  # noqa: E402
+    CollectionCoverageTracker,
+    with_collection_coverage,
+)
 
 
 def _test_root() -> Path:
@@ -25,6 +29,17 @@ def _test_root() -> Path:
     path = root / uuid.uuid4().hex
     path.mkdir()
     return path
+
+
+def _covered_items(items: list, prefix: str):
+    tracker = CollectionCoverageTracker(
+        unit_type="test_unit",
+        expected_count=1,
+        unit_prefix=prefix,
+    )
+    tracker.attempt(0)
+    tracker.succeed(0, item_count=len(items))
+    return with_collection_coverage(items, tracker)
 
 
 def _signal() -> Signal:
@@ -167,25 +182,53 @@ def test_main_pipeline_writes_metrics_artifacts_without_external_services():
         patch.object(pipeline.settings, "validate", return_value=None),
         patch.object(pipeline, "load_personal_context", return_value={}),
         patch.object(pipeline, "load_ingestion_subscription_settings", return_value={"sources": [], "project_links": []}),
-        patch.object(pipeline, "collect_rss_signals", return_value=[smoke_signal.to_dict()]),
+        patch.object(
+            pipeline,
+            "collect_rss_signals",
+            return_value=_covered_items([smoke_signal.to_dict()], "rss_source"),
+        ),
         patch.object(pipeline, "save_signals", return_value=None),
-        patch.object(pipeline, "collect_official_signals", return_value=[]),
+        patch.object(
+            pipeline,
+            "collect_official_signals",
+            return_value=_covered_items([], "official_source"),
+        ),
         patch.object(pipeline, "save_official_signals", return_value=None),
-        patch.object(pipeline, "collect_github_agent_signals", return_value=[]),
+        patch.object(
+            pipeline,
+            "collect_github_agent_signals",
+            return_value=_covered_items([], "github_agent_query"),
+        ),
         patch.object(pipeline, "save_github_agent_signals", return_value=None),
         patch.object(pipeline, "normalize_github_agent_signals", return_value=[]),
-        patch.object(pipeline, "collect_hackernews_agent_signals", return_value=[]),
+        patch.object(
+            pipeline,
+            "collect_hackernews_agent_signals",
+            return_value=_covered_items([], "hackernews_agent_query"),
+        ),
         patch.object(pipeline, "save_hackernews_agent_signals", return_value=None),
         patch.object(pipeline, "collect_normalized_hackernews_agent_signals", return_value=[]),
-        patch.object(pipeline, "collect_producthunt_agent_signals", return_value=[]),
+        patch.object(
+            pipeline,
+            "collect_producthunt_agent_signals",
+            return_value=_covered_items([], "producthunt_request"),
+        ),
         patch.object(pipeline, "save_producthunt_agent_signals", return_value=None),
         patch.object(pipeline, "collect_normalized_producthunt_agent_signals", return_value=[]),
         patch.object(pipeline, "classify_agent_signals", side_effect=lambda items: items),
         patch.object(pipeline, "attach_agent_scores_to_signals", side_effect=lambda items: items),
         patch.object(pipeline, "save_agent_watch_signals", return_value=None),
-        patch.object(pipeline, "collect_github_friction_signals", return_value=[]),
+        patch.object(
+            pipeline,
+            "collect_github_friction_signals",
+            return_value=_covered_items([], "github_friction_query"),
+        ),
         patch.object(pipeline, "save_github_friction_signals", return_value=None),
-        patch.object(pipeline, "collect_hackernews_friction_signals", return_value=[]),
+        patch.object(
+            pipeline,
+            "collect_hackernews_friction_signals",
+            return_value=_covered_items([], "hackernews_friction_query"),
+        ),
         patch.object(pipeline, "save_hackernews_friction_signals", return_value=None),
         patch.object(pipeline, "collect_normalized_friction_signals", return_value=[]),
         patch.object(pipeline, "save_friction_signals", return_value=None),
@@ -264,9 +307,15 @@ def test_main_pipeline_writes_metrics_artifacts_without_external_services():
 
         assert pipeline_runs[-1]["success"] is True
         assert pipeline_runs[-1]["artifact_written_count"] >= 3
+        assert pipeline_runs[-1]["collector_plan"]["complete"] is True
+        assert pipeline_runs[-1]["collector_plan"]["attempted_step_ids"] == list(
+            pipeline.COLLECTOR_STEP_IDS
+        )
         assert len(collector_lines) >= 8
         assert summary["pipeline"]["success"] is True
         assert summary["collectors"]["total_runs"] >= 8
+        assert summary["collectors"]["coverage"]["completeness"] == "complete"
+        assert all("coverage" in json.loads(line) for line in collector_lines)
         assert weekly_summary["period_id"] == expected_week
         assert weekly_summary["date_count"] == 1
         assert monthly_summary["period_id"] == expected_month

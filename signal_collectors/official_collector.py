@@ -11,6 +11,12 @@ from bs4 import BeautifulSoup
 import boto3
 from dotenv import load_dotenv
 
+from signal_collectors.collection_coverage import (
+    CollectionCoverageTracker,
+    failure_reason_code,
+    with_collection_coverage,
+)
+
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 OUTPUT_FILE = BASE_DIR / "data" / "output" / "official_signals.json"
@@ -32,7 +38,7 @@ SUBSCRIPTION_S3_PREFIX = (
     or "settings/subscriptions"
 ).strip().strip("/")
 
-# This can later be loaded from config or .env.
+# This can be moved to config or .env later.
 RADAR_TIME_WINDOW_HOURS = 24
 
 HEADERS = {
@@ -204,13 +210,20 @@ def get_effective_source_configs() -> List[Dict]:
     return SOURCE_CONFIGS
 
 
-def fetch_html(url: str, timeout: int = 20) -> Optional[str]:
+def fetch_html(
+    url: str,
+    timeout: int = 20,
+    *,
+    on_error=None,
+) -> Optional[str]:
     try:
         resp = requests.get(url, headers=HEADERS, timeout=timeout)
         resp.raise_for_status()
         return resp.text
     except Exception as e:
         print(f"[fetch_html] failed for {url}: {e}")
+        if on_error:
+            on_error(e)
         return None
 
 
@@ -224,7 +237,7 @@ def parse_datetime_safe(value: str) -> Optional[datetime]:
 
     value = clean_text(value)
 
-    # Accept timestamps ending in Z.
+    # Accept an ISO timestamp with a trailing Z.
     if value.endswith("Z"):
         value = value.replace("Z", "+00:00")
 
@@ -355,8 +368,10 @@ def parse_article_page(
     fallback_source: str,
     fallback_author: str,
     fallback_category: str,
+    *,
+    on_fetch_error=None,
 ) -> Optional[Dict]:
-    html = fetch_html(url)
+    html = fetch_html(url, on_error=on_fetch_error)
     if not html:
         return None
 
@@ -376,7 +391,7 @@ def parse_article_page(
 
     published_dt = parse_datetime_safe(published_at)
     if not published_dt:
-        # Drop articles without a parseable publication time to avoid mixing in stale content.
+        # Drop items without a parseable publish time so stale items do not mix in.
         print(f"[official] skip no/invalid published_at: {url}")
         return None
 
@@ -401,8 +416,13 @@ def parse_article_page(
     }
 
 
-def collect_from_source(config: Dict, per_source_limit: int = 10) -> List[Dict]:
-    list_html = fetch_html(config["list_url"])
+def collect_from_source(
+    config: Dict,
+    per_source_limit: int = 10,
+    *,
+    on_fetch_error=None,
+) -> List[Dict]:
+    list_html = fetch_html(config["list_url"], on_error=on_fetch_error)
     if not list_html:
         return []
 
@@ -423,6 +443,7 @@ def collect_from_source(config: Dict, per_source_limit: int = 10) -> List[Dict]:
             fallback_source=config["source"],
             fallback_author=config["author"],
             fallback_category=config["category"],
+            on_fetch_error=on_fetch_error,
         )
         if not article:
             continue
@@ -451,14 +472,39 @@ def collect_from_source(config: Dict, per_source_limit: int = 10) -> List[Dict]:
 def collect_official_signals() -> List[Dict]:
     all_signals: List[Dict] = []
     effective_configs = get_effective_source_configs()
+    coverage = CollectionCoverageTracker(
+        unit_type="source",
+        expected_count=len(effective_configs),
+        unit_prefix="official_source",
+    )
 
     print(f"[official] effective source config count: {len(effective_configs)}")
 
-    for config in effective_configs:
+    for source_index, config in enumerate(effective_configs):
+        coverage.attempt(source_index)
         print(f"[official] collecting from {config['source']} ...")
-        source_signals = collect_from_source(config, per_source_limit=10)
+        source_failure_reason: str | None = None
+
+        def record_fetch_failure(exc: BaseException) -> None:
+            nonlocal source_failure_reason
+            source_failure_reason = failure_reason_code(exc)
+
+        try:
+            source_signals = collect_from_source(
+                config,
+                per_source_limit=10,
+                on_fetch_error=record_fetch_failure,
+            )
+        except Exception as exc:
+            print(f"[official] collection failed for {config['source']}: {exc}")
+            coverage.fail(source_index, reason_code=failure_reason_code(exc))
+            continue
         print(f"[official] {config['source']} -> {len(source_signals)} fresh signals")
         all_signals.extend(source_signals)
+        if source_failure_reason:
+            coverage.fail(source_index, reason_code=source_failure_reason)
+        else:
+            coverage.succeed(source_index, item_count=len(source_signals))
 
     deduped: List[Dict] = []
     seen_urls = set()
@@ -470,7 +516,7 @@ def collect_official_signals() -> List[Dict]:
         seen_urls.add(url)
         deduped.append(item)
 
-    return deduped
+    return with_collection_coverage(deduped, coverage)
 
 
 def save(signals: List[Dict]) -> None:

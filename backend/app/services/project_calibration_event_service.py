@@ -124,6 +124,9 @@ def append_project_calibration_event(
     upload_reason = _safe_text(item.get("upload_reason") or verification_metadata.get("upload_reason"))
     intended_use = _safe_text(item.get("intended_use") or verification_metadata.get("intended_use"))
     cognitive_layer = _safe_text(item.get("cognitive_layer") or verification_metadata.get("cognitive_layer") or "unclassified")
+    topics = _safe_text_list(item.get("topics"))
+    if not topics and _safe_text(item.get("topic")):
+        topics = [_safe_text(item.get("topic"))]
     manual_project_takeaway_override = bool(verification_metadata.get("manual_project_takeaway_override"))
     deep_project_match_review = _deep_project_match_review(verification_metadata)
     event = {
@@ -133,6 +136,7 @@ def append_project_calibration_event(
         "project_name": _safe_text(item.get("project_name")),
         "signal_id": source_signal_id,
         "signal_title": _safe_text(item.get("signal_title")),
+        "topics": topics,
         "source_type": source_type,
         "manual_session_id": manual_session_id,
         "is_manual_source": source_type == "manual_upload",

@@ -7,19 +7,17 @@ from unittest.mock import patch
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
-sys.path.insert(0, str(REPO_ROOT))
-for module_name in list(sys.modules):
-    if module_name == "app" or module_name.startswith("app."):
-        del sys.modules[module_name]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
-from app.intelligence.llm_executor import execute_routed_task  # noqa: E402
+from app.intelligence import llm_executor  # noqa: E402
 
 
 class LLMExecutorTests(unittest.TestCase):
     def setUp(self):
-        self.metrics_patcher = patch("app.intelligence.llm_executor.record_llm_call")
+        self.metrics_patcher = patch.object(llm_executor, "record_llm_call")
         self.mock_record_llm_call = self.metrics_patcher.start()
-        self.route_event_patcher = patch("app.intelligence.llm_executor.record_route_event")
+        self.route_event_patcher = patch.object(llm_executor, "record_route_event")
         self.mock_record_route_event = self.route_event_patcher.start()
 
     def tearDown(self):
@@ -48,8 +46,8 @@ class LLMExecutorTests(unittest.TestCase):
                 "MODEL_ROUTER_TIER2_MODEL": "gpt-4.1-mini",
             },
             clear=False,
-        ), patch("app.intelligence.llm_executor._openai_client", return_value=mock_client):
-            result = execute_routed_task(
+        ), patch.object(llm_executor, "_openai_client", return_value=mock_client):
+            result = llm_executor.execute_routed_task(
                 task_type="structure",
                 messages=[{"role": "user", "content": "hello"}],
                 json_mode=True,
@@ -91,8 +89,8 @@ class LLMExecutorTests(unittest.TestCase):
                 "MODEL_ROUTER_TIER2_MODEL": "gpt-5.5",
             },
             clear=False,
-        ), patch("app.intelligence.llm_executor._openai_client", return_value=mock_client):
-            result = execute_routed_task(
+        ), patch.object(llm_executor, "_openai_client", return_value=mock_client):
+            result = llm_executor.execute_routed_task(
                 task_type="structure",
                 messages=[{"role": "user", "content": "hello"}],
                 temperature=0.2,
@@ -130,8 +128,8 @@ class LLMExecutorTests(unittest.TestCase):
                 "MODEL_ROUTER_TIER2_MODEL": "gpt-4.1-mini",
             },
             clear=False,
-        ), patch("app.intelligence.llm_executor._openai_client", return_value=mock_client):
-            result = execute_routed_task(
+        ), patch.object(llm_executor, "_openai_client", return_value=mock_client):
+            result = llm_executor.execute_routed_task(
                 task_type="structure",
                 messages=[{"role": "user", "content": "hello"}],
                 temperature=0.2,
@@ -162,8 +160,8 @@ class LLMExecutorTests(unittest.TestCase):
                 "ANTHROPIC_API_KEY": "test-key",
             },
             clear=False,
-        ), patch("app.intelligence.llm_executor._anthropic_client", return_value=mock_client):
-            result = execute_routed_task(
+        ), patch.object(llm_executor, "_anthropic_client", return_value=mock_client):
+            result = llm_executor.execute_routed_task(
                 task_type="strategy",
                 messages=[
                     {"role": "system", "content": "system prompt"},
@@ -199,8 +197,8 @@ class LLMExecutorTests(unittest.TestCase):
                 "ANTHROPIC_API_KEY": "test-key",
             },
             clear=False,
-        ), patch("app.intelligence.llm_executor._anthropic_client", return_value=mock_client):
-            result = execute_routed_task(
+        ), patch.object(llm_executor, "_anthropic_client", return_value=mock_client):
+            result = llm_executor.execute_routed_task(
                 task_type="structure",
                 messages=[
                     {"role": "system", "content": "system prompt"},

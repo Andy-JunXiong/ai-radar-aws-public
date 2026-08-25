@@ -4,6 +4,8 @@ import hashlib
 from datetime import datetime, timezone
 from typing import Any
 
+from app.services.topic_display_service import canonicalize_topic_labels
+
 
 _STOP_WORDS = {
     "a",
@@ -743,6 +745,7 @@ def _build_convergence_briefs(
                     "pair_type": "exploratory" if exploratory_pair else "topic_overlap",
                     "score": round(combined_score + (overlap_score * 0.1), 3),
                     "shared_topics": shared_topics,
+                    "topic_display_labels": canonicalize_topic_labels(shared_topics),
                     "strategic_topic_overlap": strategic_overlap[:4],
                     "agent_watch_item": {
                         key: agent_item.get(key)

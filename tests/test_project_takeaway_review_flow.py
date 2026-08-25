@@ -294,6 +294,7 @@ class ProjectTakeawayReviewFlowTests(unittest.TestCase):
             written = project_intelligence_service.add_signal_to_project_improvements(
                 signal_id="sig-provenance",
                 signal_title="Provenance candidate",
+                topics=["AI Agents", "ai agents", "Agent UX"],
                 signal_summary="Summary",
                 why_it_matters="Why",
                 relevance_to_projects={"AI Radar": "Useful project fit."},
@@ -312,6 +313,7 @@ class ProjectTakeawayReviewFlowTests(unittest.TestCase):
 
         self.assertEqual(written[0]["produced_by_model"], produced_by_model)
         self.assertEqual(written[0]["verification_metadata"]["produced_by_model"], produced_by_model)
+        self.assertEqual(written[0]["topics"], ["AI Agents", "Agent UX"])
 
     def test_create_project_takeaway_candidate_fills_model_provenance_from_signal(self):
         produced_by_model = {
@@ -336,6 +338,7 @@ class ProjectTakeawayReviewFlowTests(unittest.TestCase):
         payload = projects_route.ProjectTakeawayCandidateRequest(
             signal_id="sig-route-provenance",
             signal_title="Route fills provenance",
+            topics=["AI Agents"],
             relevance_to_projects={"AI Radar": "Useful project fit."},
             verification_metadata={
                 "verification_status": "verified",
@@ -358,6 +361,7 @@ class ProjectTakeawayReviewFlowTests(unittest.TestCase):
 
         passed_metadata = add_signal.call_args.kwargs["verification_metadata"]
         self.assertEqual(passed_metadata["produced_by_model"], produced_by_model)
+        self.assertEqual(add_signal.call_args.kwargs["topics"], ["AI Agents"])
 
     def test_create_project_takeaway_candidate_preserves_verified_claim_items(self):
         payload = projects_route.ProjectTakeawayCandidateRequest(
@@ -1905,6 +1909,7 @@ class ProjectTakeawayReviewFlowTests(unittest.TestCase):
                 "source_type": "manual_upload",
                 "manual_session_id": "session-123",
                 "signal_title": "Manual source",
+                "topics": ["AI Agents", "Agent UX"],
                 "verification_metadata": {
                     "upload_reason": "Compare against roadmap",
                     "intended_use": "Watch for project fit",
@@ -1921,6 +1926,7 @@ class ProjectTakeawayReviewFlowTests(unittest.TestCase):
         self.assertEqual(record["source_type"], "manual_upload")
         self.assertTrue(record["is_manual_source"])
         self.assertEqual(record["manual_session_id"], "session-123")
+        self.assertEqual(record["topics"], ["AI Agents", "Agent UX"])
         self.assertEqual(record["upload_reason"], "Compare against roadmap")
         self.assertEqual(record["intended_use"], "Watch for project fit")
         self.assertEqual(record["cognitive_layer"], "L2")
@@ -2137,6 +2143,7 @@ class ProjectTakeawayReviewFlowTests(unittest.TestCase):
                 item={
                     "source_type": "manual_upload",
                     "manual_session_id": "session-123",
+                    "topics": ["AI Agents", "Agent UX"],
                     "verification_metadata": {
                         "upload_reason": "User-selected case study",
                         "intended_use": "Action review",
@@ -2154,6 +2161,7 @@ class ProjectTakeawayReviewFlowTests(unittest.TestCase):
             self.assertEqual(event["source_type"], "manual_upload")
             self.assertTrue(event["is_manual_source"])
             self.assertEqual(event["manual_session_id"], "session-123")
+            self.assertEqual(event["topics"], ["AI Agents", "Agent UX"])
             self.assertEqual(event["upload_reason"], "User-selected case study")
             self.assertEqual(event["intended_use"], "Action review")
             self.assertEqual(event["cognitive_layer"], "L3")
@@ -2348,6 +2356,7 @@ class ProjectTakeawayReviewFlowTests(unittest.TestCase):
                     "project_name": "AI Radar",
                     "signal_id": "manual_123",
                     "signal_title": "Manual signal",
+                    "topics": ["AI Agents", "Agent UX"],
                     "outcome": "watch",
                     "reason": "Track this user-selected material.",
                     "source_type": "manual_upload",
@@ -2374,6 +2383,7 @@ class ProjectTakeawayReviewFlowTests(unittest.TestCase):
                     "event_type": "takeaway_accepted",
                     "project_id": "ai_radar",
                     "signal_id": "sig_1",
+                    "topics": ["AI Policy"],
                     "source_type": "signal",
                     "verification_status": "verified",
                     "created_at": "2026-05-04T13:00:00+00:00",
@@ -2390,6 +2400,7 @@ class ProjectTakeawayReviewFlowTests(unittest.TestCase):
             self.assertEqual(result["items"][1]["event_kind"], "review")
             self.assertEqual(result["items"][1]["is_manual_source"], True)
             self.assertEqual(result["items"][1]["manual_session_id"], "123")
+            self.assertEqual(result["items"][1]["topics"], ["AI Agents", "Agent UX"])
             self.assertEqual(result["items"][1]["upload_reason"], "Compare a user-selected case study")
             self.assertEqual(result["items"][1]["intended_use"], "Watch against project direction")
             self.assertEqual(result["items"][1]["cognitive_layer"], "L3")
@@ -2404,6 +2415,9 @@ class ProjectTakeawayReviewFlowTests(unittest.TestCase):
             self.assertEqual(result["summary"]["signal_type_mix"], {"calibration_learning": 1, "manual_judgment": 1})
             self.assertEqual(result["summary"]["event_kind_mix"], {"calibration": 1, "review": 1})
             self.assertEqual(result["summary"]["source_type_mix"], {"signal": 1, "manual_upload": 1})
+            self.assertEqual(result["summary"]["topic_event_count"], 2)
+            self.assertEqual(result["summary"]["unclassified_topic_event_count"], 0)
+            self.assertEqual(result["summary"]["topic_mix"][0], {"value": "Agent UX", "count": 1})
             self.assertEqual(
                 result["summary"]["manual_intent_summary"]["upload_reason_mix"],
                 [{"value": "Compare a user-selected case study", "count": 1}],

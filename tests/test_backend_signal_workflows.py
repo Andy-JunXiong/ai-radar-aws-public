@@ -665,6 +665,7 @@ class SignalRouteTests(unittest.TestCase):
         self.assertEqual(saved_payload.content_type, "manual_session")
         self.assertEqual(saved_payload.signal_id, "manual_manual-1")
         self.assertEqual(add_project_improvements.call_args.kwargs["signal_id"], "manual_manual-1")
+        self.assertEqual(add_project_improvements.call_args.kwargs["topics"], ["Manual Upload"])
         lifecycle_mock.assert_called_once()
         lifecycle_kwargs = lifecycle_mock.call_args.kwargs
         self.assertEqual(lifecycle_kwargs["signal_id"], "manual_manual-1")
@@ -716,6 +717,7 @@ class SignalRouteTests(unittest.TestCase):
         self.assertEqual(saved_payload.content_type, "manual_session")
         self.assertEqual(saved_payload.signal_id, "manual_manual-1")
         self.assertEqual(add_project_improvements.call_args.kwargs["signal_id"], "manual_manual-1")
+        self.assertEqual(add_project_improvements.call_args.kwargs["topics"], ["Manual Upload"])
         self.assertEqual(lifecycle_mock.call_args.kwargs["signal_id"], "manual_manual-1")
 
     def test_complete_automatic_signal_records_completion_lifecycle_softly(self):
@@ -733,7 +735,7 @@ class SignalRouteTests(unittest.TestCase):
 
         with patch.object(signals_route, "save_reflection_to_file", return_value=saved_record), patch.object(
             signals_route, "add_signal_to_project_improvements", return_value=project_improvements
-        ), patch.object(
+        ) as add_project_improvements, patch.object(
             signals_route, "find_manual_signal", return_value=None
         ), patch.object(
             signals_route, "update_signal_status_by_signal_id", return_value={"updated_keys": ["signals/latest/signals.json"]}
@@ -752,6 +754,7 @@ class SignalRouteTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "completed")
         self.assertEqual(result["updated_keys"], ["signals/latest/signals.json"])
+        self.assertEqual(add_project_improvements.call_args.kwargs["topics"], ["Signal"])
         lifecycle_mock.assert_called_once()
         lifecycle_kwargs = lifecycle_mock.call_args.kwargs
         self.assertEqual(lifecycle_kwargs["signal_id"], "sig-1")

@@ -1518,6 +1518,7 @@ def add_signal_to_project_improvements(
     *,
     signal_id: str,
     signal_title: str,
+    topics: list[str] | None = None,
     signal_summary: str,
     why_it_matters: str,
     relevance_to_projects: Any,
@@ -1540,6 +1541,15 @@ def add_signal_to_project_improvements(
     )
     written: list[dict[str, Any]] = []
     normalized_signal_id = _safe_text(signal_id)
+    normalized_topics: list[str] = []
+    seen_topics: set[str] = set()
+    for topic in topics or []:
+        normalized_topic = _safe_text(topic)
+        topic_key = normalized_topic.casefold()
+        if not normalized_topic or topic_key in seen_topics:
+            continue
+        seen_topics.add(topic_key)
+        normalized_topics.append(normalized_topic)
     is_manual_source = normalized_signal_id.startswith("manual_") or normalized_signal_id.startswith("manual-")
     manual_session_id = ""
     if is_manual_source:
@@ -1566,6 +1576,7 @@ def add_signal_to_project_improvements(
         improvement_item = {
             "signal_id": signal_id,
             "signal_title": signal_title,
+            "topics": normalized_topics,
             "signal_summary": signal_summary,
             "source_type": "manual_upload" if is_manual_source else "signal",
             "manual_session_id": manual_session_id,

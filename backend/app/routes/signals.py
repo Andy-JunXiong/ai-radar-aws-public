@@ -369,6 +369,8 @@ def _signal_response_payload(normalized: dict) -> dict:
         "source_stated_limits_status": normalized.get("source_stated_limits_status", ""),
         "topic": normalized.get("topic", "General AI"),
         "score": normalized.get("score"),
+        "importance_level": normalized.get("importance_level"),
+        "importance_reason": normalized.get("importance_reason"),
         "insight_status": normalized.get("insight_status", "unknown"),
         "insight_status_label": normalized.get("insight_status_label", "Status unknown"),
         "why_it_matters": normalized.get("why_it_matters", ""),
@@ -526,6 +528,8 @@ def normalize_signal(signal: dict, index: int):
         "source_stated_limits_status": signal.get("source_stated_limits_status", ""),
         "topic": topic,
         "score": score,
+        "importance_level": signal.get("importance_level"),
+        "importance_reason": signal.get("importance_reason"),
         "insight_status": insight_status,
         "insight_status_label": insight_status_label,
         "why_it_matters": signal.get("why_it_matters") or signal.get("insight", ""),
@@ -718,7 +722,7 @@ def normalize_manual_session(session: dict, index: int) -> dict:
 
     return {
         "id": session_id,
-        "signal_id": session_id,
+        "signal_id": f"manual_{session_id}",
         "title": title,
         "summary": summary,
         "source": "manual",
@@ -735,6 +739,8 @@ def normalize_manual_session(session: dict, index: int) -> dict:
         "source_excerpt_length": len(source_excerpt) if source_excerpt else 0,
         "topic": analysis_fields["topic"],
         "score": None,
+        "importance_level": session.get("importance_level"),
+        "importance_reason": session.get("importance_reason"),
         "insight_status": "manual_completed" if analysis_status == "completed" else "manual_pending",
         "insight_status_label": "Manual session analyzed" if analysis_status == "completed" else "Manual session pending",
         "why_it_matters": analysis_fields["why_it_matters"],
@@ -1710,6 +1716,7 @@ def complete_signal(payload: CompleteSignalRequest):
     project_improvements = add_signal_to_project_improvements(
         signal_id=durable_signal_id,
         signal_title=payload.signal_title or "",
+        topics=[payload.topic] if payload.topic else [],
         signal_summary=payload.signal_summary or "",
         why_it_matters=payload.why_it_matters or "",
         relevance_to_projects=payload.relevance_to_projects or "",
