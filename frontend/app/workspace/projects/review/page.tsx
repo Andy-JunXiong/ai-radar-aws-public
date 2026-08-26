@@ -129,6 +129,7 @@ type ProjectTakeawayCandidate = {
   fit_reason?: string;
   benefits?: string;
   final_reflection?: string;
+  topics?: string[];
   status?: string;
   score?: number;
   suggested_stage?: string;
@@ -430,6 +431,45 @@ type CandidatesResponse = {
 type ConfirmResponse = {
   item?: ProjectTakeawayCandidate;
   detail?: string;
+};
+
+type MergePreviewComparison = {
+  field: string;
+  source_value?: unknown;
+  target_value?: unknown;
+  selected_from: "source" | "target";
+  preview_value?: unknown;
+  different: boolean;
+};
+
+type MergePreviewItemView = {
+  identity: {
+    project_id: string;
+    signal_id: string;
+    status: string;
+  };
+  provenance: Record<string, unknown>;
+  verification: {
+    verification_status?: string;
+    claim_support_summary?: Record<string, number>;
+    allowed_downstream_actions?: string[];
+    blocked_downstream_actions?: string[];
+    action_eligibility?: ActionEligibilitySummary;
+    verification_metadata?: Record<string, unknown>;
+  };
+  timestamps: Record<string, unknown>;
+};
+
+type MergePreviewResponse = {
+  preview_version?: string;
+  source?: MergePreviewItemView;
+  target?: MergePreviewItemView;
+  field_comparisons?: MergePreviewComparison[];
+  result_preview?: Record<string, unknown>;
+  warnings?: Array<{ code?: string; message?: string }>;
+  persisted?: boolean;
+  mutation_performed?: boolean;
+  detail?: string | { reason_code?: string; message?: string };
 };
 
 type ReviewRecordsResponse = {
@@ -2845,6 +2885,21 @@ function missingReviewMetadata(action: ReviewAction, metadata: ReviewMetadata) {
   return [];
 }
 
+function formatMergePreviewValue(value: unknown) {
+  if (value === null || value === undefined || value === "") return "Not recorded";
+  if (Array.isArray(value)) return value.length ? value.map((item) => String(item)).join(", ") : "Not recorded";
+  if (typeof value === "object") return JSON.stringify(value, null, 2);
+  return String(value);
+}
+
+function mergePreviewErrorMessage(detail: MergePreviewResponse["detail"], fallback: string) {
+  if (typeof detail === "string" && detail.trim()) return detail;
+  if (detail && typeof detail === "object" && detail.message) {
+    return detail.reason_code ? `${detail.message} (${detail.reason_code})` : detail.message;
+  }
+  return fallback;
+}
+
 export default function ProjectTakeawayReviewPage() {
   const searchParams = useSearchParams();
   const focusedSignalId = (searchParams.get("signal_id") || "").trim();
@@ -2900,6 +2955,13 @@ export default function ProjectTakeawayReviewPage() {
   const [counterCheckErrorByKey, setCounterCheckErrorByKey] = useState<Record<string, string>>({});
   const [confirmedItem, setConfirmedItem] = useState<ProjectTakeawayCandidate | null>(null);
   const [closedItem, setClosedItem] = useState<ProjectTakeawayCandidate | null>(null);
+  const [mergeSource, setMergeSource] = useState<ProjectTakeawayCandidate | null>(null);
+  const [mergeTargetSignalId, setMergeTargetSignalId] = useState("");
+  const [mergeFieldResolutions, setMergeFieldResolutions] = useState<Record<string, "source" | "target">>({});
+  const [mergePreview, setMergePreview] = useState<MergePreviewResponse | null>(null);
+  const [mergePreviewLoading, setMergePreviewLoading] = useState(false);
+  const [mergePreviewError, setMergePreviewError] = useState("");
+  const [mergePreviewNeedsRefresh, setMergePreviewNeedsRefresh] = useState(false);
 
   const loadCandidates = useCallback(async (options?: { keepExistingOnError?: boolean }) => {
     setLoading(true);
@@ -3709,6 +3771,62 @@ export default function ProjectTakeawayReviewPage() {
       setErrorMessage(error instanceof Error ? error.message : "Failed to complete this action.");
     } finally {
       setCompletingActionKey("");
+    }
+  }
+
+  function openMergePreview(item: ProjectTakeawayCandidate) {
+    setMergeSource(item);
+    setMergeTargetSignalId("");
+    setMergeFieldResolutions({});
+    setMergePreview(null);
+    setMergePreviewError("");
+    setMergePreviewNeedsRefresh(false);
+  }
+
+  function closeMergePreview() {
+    setMergeSource(null);
+    setMergeTargetSignalId("");
+    setMergeFieldResolutions({});
+    setMergePreview(null);
+    setMergePreviewError("");
+    setMergePreviewNeedsRefresh(false);
+  }
+
+  async function handleMergePreview() {
+    if (!mergeSource?.project_id || !mergeSource.signal_id || !mergeTargetSignalId) return;
+
+    setMergePreviewLoading(true);
+    setMergePreviewError("");
+    try {
+      const response = await adminFetch(
+        apiUrl(
+          `/projects/${encodeURIComponent(mergeSource.project_id)}/takeaway-candidates/merge-preview`
+        ),
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            source_signal_id: mergeSource.signal_id,
+            target_signal_id: mergeTargetSignalId,
+            field_resolutions: mergeFieldResolutions,
+          }),
+        }
+      );
+      const data = (await response.json().catch(() => null)) as MergePreviewResponse | null;
+      if (!response.ok) {
+        throw new Error(
+          mergePreviewErrorMessage(data?.detail, `Failed to load merge preview (${response.status})`)
+        );
+      }
+      if (!data || data.persisted !== false || data.mutation_performed !== false) {
+        throw new Error("Merge preview response did not confirm the zero-write contract.");
+      }
+      setMergePreview(data);
+      setMergePreviewNeedsRefresh(false);
+    } catch (error) {
+      setMergePreviewError(error instanceof Error ? error.message : "Failed to load merge preview.");
+    } finally {
+      setMergePreviewLoading(false);
     }
   }
 
@@ -5275,6 +5393,16 @@ export default function ProjectTakeawayReviewPage() {
               const watchActionKey = `${key}:watch`;
               const actionActionKey = `${key}:action`;
               const normalizedStatus = (item.status || "").toLowerCase();
+              const confirmedTargetsForProject = items.filter(
+                (candidate) =>
+                  candidate.project_id === item.project_id &&
+                  candidate.signal_id !== item.signal_id &&
+                  (candidate.status || "").toLowerCase() === "confirmed" &&
+                  Boolean(candidate.signal_id)
+              );
+              const mergePanelOpen = Boolean(
+                mergeSource && candidateKey(mergeSource.project_id, mergeSource.signal_id) === key
+              );
               const actionEligibility = getCandidateActionEligibility(item);
               const verifiedInsightObjectRows = buildVerifiedInsightObjectRows(verification, actionEligibility);
               const showVerifiedInsightObject = hasVerifiedInsightObjectSurface(verification, actionEligibility);
@@ -6450,6 +6578,21 @@ export default function ProjectTakeawayReviewPage() {
                         Knowledge candidate: use Fit Detail instead of Signal Detail.
                       </span>
                     ) : null}
+                    {activeView === "pending" && item.project_id && item.signal_id ? (
+                      <button
+                        type="button"
+                        onClick={() => openMergePreview(item)}
+                        disabled={confirmedTargetsForProject.length === 0}
+                        style={confirmedTargetsForProject.length === 0 ? disabledButtonStyle : secondaryButtonStyle}
+                        title={
+                          confirmedTargetsForProject.length === 0
+                            ? "No confirmed Project Takeaway is available in this project."
+                            : "Select a confirmed Project Takeaway for a read-only comparison."
+                        }
+                      >
+                        Compare with confirmed
+                      </button>
+                    ) : null}
                     {activeView === "pending" && item.project_id && item.signal_id && !projectTakeawayBlockedForCandidate ? (
                       <button
                         type="button"
@@ -6544,6 +6687,165 @@ export default function ProjectTakeawayReviewPage() {
                       </button>
                     ) : null}
                   </div>
+                  {mergePanelOpen ? (
+                    <section style={mergePreviewPanelStyle} aria-label="Review Inbox merge preview">
+                      <div style={mergePreviewHeaderStyle}>
+                        <div>
+                          <span style={detailLabelStyle}>Review Inbox Merge Preview v1</span>
+                          <strong style={mergePreviewTitleStyle}>Compare candidate with confirmed memory</strong>
+                        </div>
+                        <div style={mergePreviewBadgeRowStyle}>
+                          <span style={mergePreviewSafeChipStyle}>Preview only</span>
+                          <span style={mergePreviewSafeChipStyle}>No write</span>
+                        </div>
+                      </div>
+                      <p style={mergePreviewBoundaryStyle}>
+                        Select the target explicitly. This comparison does not merge verification, change blocked
+                        actions, create a ReviewRecord, or modify either Project Takeaway.
+                      </p>
+
+                      <label style={mergePreviewControlStyle}>
+                        <span style={metadataFieldLabelStyle}>Confirmed target in this project</span>
+                        <select
+                          value={mergeTargetSignalId}
+                          onChange={(event) => {
+                            setMergeTargetSignalId(event.target.value);
+                            setMergeFieldResolutions({});
+                            setMergePreview(null);
+                            setMergePreviewError("");
+                            setMergePreviewNeedsRefresh(false);
+                          }}
+                          style={mergePreviewSelectStyle}
+                        >
+                          <option value="">Select a confirmed target...</option>
+                          {confirmedTargetsForProject.map((candidate) => (
+                            <option key={candidateKey(candidate.project_id, candidate.signal_id)} value={candidate.signal_id}>
+                              {candidate.signal_title || candidate.signal_id}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+
+                      <div style={mergePreviewActionRowStyle}>
+                        <button
+                          type="button"
+                          onClick={() => void handleMergePreview()}
+                          disabled={!mergeTargetSignalId || mergePreviewLoading}
+                          style={!mergeTargetSignalId || mergePreviewLoading ? disabledButtonStyle : primaryButtonStyle}
+                        >
+                          {mergePreviewLoading
+                            ? "Building preview..."
+                            : mergePreviewNeedsRefresh
+                              ? "Rebuild read-only preview"
+                              : mergePreview
+                                ? "Refresh read-only preview"
+                                : "Build read-only preview"}
+                        </button>
+                        <button type="button" onClick={closeMergePreview} style={secondaryButtonStyle}>
+                          Close comparison
+                        </button>
+                      </div>
+
+                      {mergePreviewNeedsRefresh ? (
+                        <div style={mergePreviewNoticeStyle}>
+                          A field choice changed. Rebuild the preview to obtain the canonical backend projection.
+                        </div>
+                      ) : null}
+                      {mergePreviewError ? <div style={overrideInlineErrorStyle}>{mergePreviewError}</div> : null}
+
+                      {mergePreview?.source && mergePreview.target ? (
+                        <div style={mergePreviewResultStyle}>
+                          <div style={mergePreviewVerificationGridStyle}>
+                            {([
+                              ["Pending source", mergePreview.source],
+                              ["Confirmed target", mergePreview.target],
+                            ] as const).map(([label, previewItem]) => (
+                              <div key={label} style={mergePreviewVerificationCardStyle}>
+                                <span style={detailLabelStyle}>{label}</span>
+                                <strong>{previewItem.identity.signal_id}</strong>
+                                <span>Status: {formatLabel(previewItem.identity.status)}</span>
+                                <span>
+                                  Verification: {formatLabel(previewItem.verification.verification_status || "not recorded")}
+                                </span>
+                                <span>
+                                  Blocked actions: {previewItem.verification.blocked_downstream_actions?.length
+                                    ? previewItem.verification.blocked_downstream_actions.join(", ")
+                                    : "None recorded"}
+                                </span>
+                                <span>
+                                  Allowed actions: {previewItem.verification.allowed_downstream_actions?.length
+                                    ? previewItem.verification.allowed_downstream_actions.join(", ")
+                                    : "None recorded"}
+                                </span>
+                                <span>
+                                  Low-risk Action: {previewItem.verification.action_eligibility?.low_risk_action_candidate
+                                    ? previewItem.verification.action_eligibility.low_risk_action_candidate.allowed
+                                      ? "Allowed by current snapshot"
+                                      : "Blocked by current snapshot"
+                                    : "Not recorded"}
+                                </span>
+                                <span>
+                                  Candidate source: {formatMergePreviewValue(previewItem.provenance.candidate_source)}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+
+                          <div style={mergePreviewFieldsStyle}>
+                            {(mergePreview.field_comparisons || []).map((comparison) => {
+                              const selectedFrom = mergeFieldResolutions[comparison.field] || comparison.selected_from;
+                              return (
+                                <div key={comparison.field} style={mergePreviewFieldCardStyle}>
+                                  <div style={mergePreviewFieldHeaderStyle}>
+                                    <strong>{formatLabel(comparison.field)}</strong>
+                                    <span style={chipStyle}>{comparison.different ? "Different" : "Same"}</span>
+                                  </div>
+                                  <div style={mergePreviewValueGridStyle}>
+                                    <div style={mergePreviewValueStyle}>
+                                      <span style={detailLabelStyle}>Pending source</span>
+                                      <span>{formatMergePreviewValue(comparison.source_value)}</span>
+                                    </div>
+                                    <div style={mergePreviewValueStyle}>
+                                      <span style={detailLabelStyle}>Confirmed target</span>
+                                      <span>{formatMergePreviewValue(comparison.target_value)}</span>
+                                    </div>
+                                  </div>
+                                  <label style={mergePreviewControlStyle}>
+                                    <span style={metadataFieldLabelStyle}>Use in result preview</span>
+                                    <select
+                                      value={selectedFrom}
+                                      onChange={(event) => {
+                                        const selection = event.target.value as "source" | "target";
+                                        setMergeFieldResolutions((current) => ({
+                                          ...current,
+                                          [comparison.field]: selection,
+                                        }));
+                                        setMergePreviewNeedsRefresh(true);
+                                      }}
+                                      style={mergePreviewSelectStyle}
+                                    >
+                                      <option value="target">Confirmed target</option>
+                                      <option value="source">Pending source</option>
+                                    </select>
+                                  </label>
+                                  <div style={mergePreviewProjectedValueStyle}>
+                                    <span style={detailLabelStyle}>Current backend result preview</span>
+                                    <strong>{formatMergePreviewValue(comparison.preview_value)}</strong>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+
+                          {(mergePreview.warnings || []).map((warning) => (
+                            <div key={warning.code || warning.message} style={mergePreviewNoticeStyle}>
+                              {warning.message}
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+                    </section>
+                  ) : null}
                 </section>
               );
             })}
@@ -8480,6 +8782,150 @@ const overrideInlineHelpStyle = {
   fontSize: "13px",
   fontWeight: 700,
   lineHeight: "1.45",
+} as const;
+
+const mergePreviewPanelStyle = {
+  marginTop: "16px",
+  border: "1px solid var(--app-primary-action-border)",
+  borderRadius: "10px",
+  background: "var(--app-surface-muted-bg)",
+  padding: "14px",
+  display: "grid",
+  gap: "12px",
+} as const;
+
+const mergePreviewHeaderStyle = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "start",
+  gap: "12px",
+  flexWrap: "wrap" as const,
+} as const;
+
+const mergePreviewTitleStyle = {
+  display: "block",
+  marginTop: "4px",
+  color: "var(--app-text-strong)",
+  fontSize: "15px",
+} as const;
+
+const mergePreviewBadgeRowStyle = {
+  display: "flex",
+  gap: "6px",
+  flexWrap: "wrap" as const,
+} as const;
+
+const mergePreviewSafeChipStyle = {
+  ...chipStyle,
+  border: "1px solid var(--app-success-border)",
+  background: "var(--app-success-bg)",
+  color: "var(--app-success-fg)",
+} as const;
+
+const mergePreviewBoundaryStyle = {
+  margin: 0,
+  color: "var(--app-text-muted)",
+  fontSize: "13px",
+  lineHeight: 1.55,
+} as const;
+
+const mergePreviewControlStyle = {
+  display: "grid",
+  gap: "6px",
+} as const;
+
+const mergePreviewSelectStyle = {
+  width: "100%",
+  border: "1px solid var(--app-surface-border)",
+  borderRadius: "8px",
+  background: "var(--app-surface-bg)",
+  color: "var(--app-text-strong)",
+  padding: "8px 10px",
+  fontSize: "13px",
+} as const;
+
+const mergePreviewActionRowStyle = {
+  display: "flex",
+  gap: "8px",
+  flexWrap: "wrap" as const,
+} as const;
+
+const mergePreviewNoticeStyle = {
+  border: "1px solid var(--app-surface-border)",
+  borderRadius: "8px",
+  background: "var(--app-surface-bg)",
+  color: "var(--app-text-muted)",
+  padding: "9px 10px",
+  fontSize: "12px",
+  lineHeight: 1.5,
+} as const;
+
+const mergePreviewResultStyle = {
+  display: "grid",
+  gap: "12px",
+} as const;
+
+const mergePreviewVerificationGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 260px), 1fr))",
+  gap: "10px",
+} as const;
+
+const mergePreviewVerificationCardStyle = {
+  border: "1px solid var(--app-surface-border)",
+  borderRadius: "8px",
+  background: "var(--app-surface-bg)",
+  color: "var(--app-text-muted)",
+  padding: "10px",
+  display: "grid",
+  gap: "6px",
+  fontSize: "12px",
+  overflowWrap: "anywhere" as const,
+} as const;
+
+const mergePreviewFieldsStyle = {
+  display: "grid",
+  gap: "10px",
+} as const;
+
+const mergePreviewFieldCardStyle = {
+  border: "1px solid var(--app-surface-border)",
+  borderRadius: "8px",
+  background: "var(--app-surface-bg)",
+  padding: "10px",
+  display: "grid",
+  gap: "10px",
+} as const;
+
+const mergePreviewFieldHeaderStyle = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: "8px",
+} as const;
+
+const mergePreviewValueGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 220px), 1fr))",
+  gap: "8px",
+} as const;
+
+const mergePreviewValueStyle = {
+  border: "1px solid var(--app-surface-border)",
+  borderRadius: "8px",
+  background: "var(--app-surface-muted-bg)",
+  padding: "8px",
+  display: "grid",
+  gap: "5px",
+  color: "var(--app-text-muted)",
+  fontSize: "12px",
+  whiteSpace: "pre-wrap" as const,
+  overflowWrap: "anywhere" as const,
+} as const;
+
+const mergePreviewProjectedValueStyle = {
+  ...mergePreviewValueStyle,
+  border: "1px solid var(--app-primary-action-border)",
 } as const;
 
 const primaryButtonStyle = {

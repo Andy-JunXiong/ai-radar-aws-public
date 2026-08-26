@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from app.services.admin_guard import require_admin_auth
 from app.services import final_takeaway_artifact_service as final_takeaway_artifacts
 
@@ -26,6 +26,7 @@ from app.services.project_intelligence_service import (
     generate_project_improvement_reviews,
     get_project_github_context_with_cache,
     load_project_improvements,
+    load_project_improvements_readonly,
     reopen_project_improvement,
     refresh_project_improvement_analysis,
     submit_project_improvement_to_github,
@@ -62,6 +63,10 @@ from app.services.project_takeaway_constants import (
 )
 from app.services.project_takeaway_candidate_policy import (
     build_project_takeaway_candidate_input,
+)
+from app.services.project_takeaway_merge_preview_service import (
+    MergePreviewValidationError,
+    build_project_takeaway_merge_preview,
 )
 from app.services.project_watch_service import (
     WATCH_MATCH_DECISIONS,
@@ -227,6 +232,12 @@ class ProjectTakeawayReviewActionRequest(BaseModel):
     followup_result: str = ""
     evidence_update: str = ""
     next_review_date: str = ""
+
+
+class ProjectTakeawayMergePreviewRequest(BaseModel):
+    source_signal_id: str
+    target_signal_id: str
+    field_resolutions: dict[str, str] = Field(default_factory=dict)
 
 
 class ProjectWatchCreateRequest(BaseModel):
@@ -1028,6 +1039,35 @@ def get_project_improvements(project_id: str):
         "updated_at": payload.get("updated_at"),
         "message": "project improvements loaded successfully",
     }
+
+
+@router.post(
+    "/projects/{project_id}/takeaway-candidates/merge-preview",
+    dependencies=[Depends(require_admin_auth)],
+)
+def preview_project_takeaway_merge(project_id: str, payload: ProjectTakeawayMergePreviewRequest):
+    project = get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found.")
+
+    improvements = load_project_improvements_readonly(project_id)
+    items = improvements.get("items", [])
+    if not isinstance(items, list):
+        items = []
+
+    try:
+        return build_project_takeaway_merge_preview(
+            project_id=project_id,
+            items=items,
+            source_signal_id=payload.source_signal_id,
+            target_signal_id=payload.target_signal_id,
+            field_resolutions=payload.field_resolutions,
+        )
+    except MergePreviewValidationError as exc:
+        raise HTTPException(
+            status_code=exc.http_status,
+            detail={"reason_code": exc.reason_code, "message": str(exc)},
+        ) from exc
 
 
 @router.get("/projects/{project_id}/improvements/{signal_id}")

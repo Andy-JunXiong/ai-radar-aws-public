@@ -861,6 +861,26 @@ def load_project_improvements(project_id: str) -> dict[str, Any]:
     return {"project_id": project_id, "items": []}
 
 
+def load_project_improvements_readonly(project_id: str) -> dict[str, Any]:
+    """Load project improvements without materializing an S3 cache in the worktree."""
+    path = _improvement_file_path(project_id)
+    if path.exists():
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            return _normalize_improvement_payload(project_id, payload)
+        except Exception:
+            pass
+
+    if _local_output_enabled():
+        return {"project_id": project_id, "items": []}
+
+    s3_payload = _read_s3_improvements(project_id)
+    if s3_payload is not None:
+        return _normalize_improvement_payload(project_id, s3_payload)
+
+    return {"project_id": project_id, "items": []}
+
+
 def save_project_improvements(project_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     normalized = _normalize_improvement_payload(
         project_id,
