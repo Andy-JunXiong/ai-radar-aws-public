@@ -288,7 +288,7 @@ class ProjectTakeawayReviewFlowTests(unittest.TestCase):
             return_value=None,
         ), patch.object(
             project_intelligence_service,
-            "list_projects",
+            "list_active_projects",
             return_value=[{"project_id": "ai_radar", "name": "AI Radar", "enabled": True}],
         ):
             written = project_intelligence_service.add_signal_to_project_improvements(
@@ -449,7 +449,7 @@ class ProjectTakeawayReviewFlowTests(unittest.TestCase):
             return_value=None,
         ), patch.object(
             project_intelligence_service,
-            "list_projects",
+            "list_active_projects",
             return_value=[{"project_id": "ai_radar", "name": "AI Radar", "enabled": True}],
         ):
             written = project_intelligence_service.add_signal_to_project_improvements(
