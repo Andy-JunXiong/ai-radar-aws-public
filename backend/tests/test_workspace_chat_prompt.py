@@ -83,6 +83,7 @@ class WorkspaceChatPromptTests(unittest.TestCase):
         ), patch(
             "app.routes.workspace.load_project_repo_snapshot",
             return_value={
+                "schema_version": 2,
                 "status": "fresh",
                 "repo": "Andy-JunXiong/ai-radar-aws",
                 "summary": "AI Radar is an AI-native intelligence system.",
@@ -94,6 +95,11 @@ class WorkspaceChatPromptTests(unittest.TestCase):
                 "keywords": ["Project Takeaways"],
                 "manifests": [{"path": "frontend/package.json"}],
                 "recent_commits": [{"message": "add project repo context"}],
+                "observation": {
+                    "head": {"sha": "b" * 40, "branch": "main"},
+                    "baseline": {"sha": "a" * 40, "branch": "main"},
+                },
+                "delta": {"status": "changed", "from_sha": "a" * 40, "to_sha": "b" * 40},
             },
         ):
             context = build_project_repo_snapshot_context()
@@ -103,6 +109,7 @@ class WorkspaceChatPromptTests(unittest.TestCase):
         self.assertIn("Signal -> Insight -> Trend -> Strategic Intelligence", context)
         self.assertIn("Strategic Intelligence -> Decision -> Review -> Learning", context)
         self.assertIn("frontend/backend split", context)
+        self.assertIn("add project repo context", context)
 
 
 if __name__ == "__main__":

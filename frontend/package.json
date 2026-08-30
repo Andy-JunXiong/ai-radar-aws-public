@@ -8,6 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "test:guidance": "node scripts/test-operator-guidance-contract.mjs",
+    "test:project-understanding": "node scripts/test-project-understanding-preview-contract.mjs",
+    "test:project-truth-map": "node scripts/test-project-truth-map-contract.mjs",
     "test:today-overview": "node scripts/test-today-overview-contract.mjs",
     "test:public-routes": "node scripts/test-public-route-contract.mjs"
   },

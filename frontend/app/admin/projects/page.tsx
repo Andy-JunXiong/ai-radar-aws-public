@@ -1,12 +1,33 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AppContainer from "@/components/AppContainer";
 import PageHeader from "@/components/PageHeader";
 import RequireAdminAuth from "@/components/RequireAdminAuth";
 import { apiUrl } from "@/lib/api";
 import { adminFetch } from "@/lib/adminAuth";
+
+type TruthMapAnchor = {
+  kind: string;
+  path: string;
+  required: boolean;
+  content_mode: "excerpt" | "metadata_only";
+  max_chars?: number;
+};
+
+type ProjectTruthMap = {
+  schema_version: 1;
+  anchors: TruthMapAnchor[];
+};
+
+type ProjectMetadata = {
+  [key: string]: unknown;
+  repo_context?: {
+    [key: string]: unknown;
+    truth_map?: ProjectTruthMap | null;
+  };
+};
 
 type ProjectRegistryItem = {
   project_id: string;
@@ -18,6 +39,7 @@ type ProjectRegistryItem = {
   current_state?: string;
   roadmap?: string;
   topics?: string[];
+  metadata?: ProjectMetadata;
 };
 
 type ProjectRegistryResponse = {
@@ -25,6 +47,7 @@ type ProjectRegistryResponse = {
 };
 
 type ProjectRepoSnapshot = {
+  schema_version?: number;
   status?: string;
   repo?: string;
   scanned_at?: string;
@@ -39,6 +62,48 @@ type ProjectRepoSnapshot = {
   top_level_tree?: Array<{ name?: string; path?: string; type?: string }>;
   recent_commits?: Array<{ sha?: string; message?: string; committed_at?: string }>;
   manifests?: Array<{ path?: string }>;
+  anchors?: Array<{
+    kind?: string;
+    path?: string;
+    required?: boolean;
+    content_mode?: string;
+    found?: boolean;
+    error?: string;
+  }>;
+  discovery?: {
+    mode?: string;
+    config_status?: string;
+    config_errors?: Array<{ path?: string; code?: string; message?: string }>;
+  };
+  observation?: {
+    head?: { sha?: string; branch?: string; committed_at?: string; scanned_at?: string } | null;
+    baseline?: { sha?: string; branch?: string; committed_at?: string; scanned_at?: string } | null;
+  };
+  interpretation?: {
+    method?: string;
+    summary?: string;
+    architecture_hints?: string[];
+    keywords?: string[];
+  };
+  delta?: {
+    status?: "initial" | "unchanged" | "changed" | "unavailable" | string;
+    from_sha?: string;
+    to_sha?: string;
+    total_commits?: number;
+    commits?: Array<{ sha?: string; message?: string; committed_at?: string; html_url?: string }>;
+    files?: Array<{
+      path?: string;
+      previous_path?: string;
+      status?: string;
+      additions?: number;
+      deletions?: number;
+      changes?: number;
+      html_url?: string;
+    }>;
+    truncated?: boolean;
+    message?: string;
+    html_url?: string;
+  };
 };
 
 type ProjectRepoSnapshotResponse = {
@@ -75,7 +140,41 @@ const EMPTY_FORM = {
   roadmap: "",
   topics: [] as string[],
   customTopics: "",
+  truthMapEnabled: false,
+  truthMapAnchors: [] as TruthMapAnchor[],
 };
+
+type ApiErrorDetail =
+  | string
+  | {
+      code?: string;
+      errors?: Array<{ path?: string; code?: string; message?: string }>;
+    };
+
+function createDefaultTruthMapAnchor(): TruthMapAnchor {
+  return {
+    kind: "readme",
+    path: "README.md",
+    required: false,
+    content_mode: "excerpt",
+    max_chars: 1600,
+  };
+}
+
+function projectTruthMap(project: ProjectRegistryItem): ProjectTruthMap | null {
+  const truthMap = project.metadata?.repo_context?.truth_map;
+  if (!truthMap || truthMap.schema_version !== 1 || !Array.isArray(truthMap.anchors)) return null;
+  return truthMap;
+}
+
+function apiErrorMessage(detail: ApiErrorDetail | undefined, fallback: string): string {
+  if (typeof detail === "string" && detail.trim()) return detail;
+  if (detail && typeof detail === "object" && Array.isArray(detail.errors) && detail.errors.length) {
+    const first = detail.errors[0];
+    return [first.path, first.message].filter(Boolean).join(": ") || fallback;
+  }
+  return fallback;
+}
 
 function normalizeStatus(value?: string): string {
   const raw = (value || "").trim().toLowerCase();
@@ -94,14 +193,18 @@ export default function AdminProjectIntakePage() {
   const [repoSnapshot, setRepoSnapshot] = useState<ProjectRepoSnapshot | null>(null);
   const [snapshotLoading, setSnapshotLoading] = useState(false);
   const [snapshotRefreshing, setSnapshotRefreshing] = useState(false);
+  const [newProjectLoading, setNewProjectLoading] = useState(false);
+  const newProjectRequestRef = useRef(0);
+  const projectConfigurationRef = useRef<HTMLElement | null>(null);
+  const projectNameRef = useRef<HTMLInputElement | null>(null);
 
-  async function fetchNextProjectId() {
+  const fetchNextProjectId = useCallback(async () => {
     const response = await fetch(apiUrl("/projects/next-id"), { cache: "no-store" });
     const data = (await response.json().catch(() => null)) as { project_id?: string } | null;
     return data?.project_id || "";
-  }
+  }, []);
 
-  async function loadProjects() {
+  const loadProjects = useCallback(async () => {
     setLoading(true);
     try {
       const response = await fetch(apiUrl("/projects"), { cache: "no-store" });
@@ -113,7 +216,7 @@ export default function AdminProjectIntakePage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
 
   async function loadRepoSnapshot(projectId: string) {
     const normalizedProjectId = projectId.trim();
@@ -140,17 +243,32 @@ export default function AdminProjectIntakePage() {
     }
   }
 
-  async function resetForNewProject() {
-    const nextId = await fetchNextProjectId().catch(() => "");
+  const resetForNewProject = useCallback(async ({ focus = true }: { focus?: boolean } = {}) => {
+    const requestId = newProjectRequestRef.current + 1;
+    newProjectRequestRef.current = requestId;
     setSelectedProjectId("");
-    setForm({
-      ...EMPTY_FORM,
-      project_id: nextId,
-    });
+    setForm(EMPTY_FORM);
     setMessage("");
     setErrorMessage("");
     setRepoSnapshot(null);
-  }
+    setNewProjectLoading(true);
+
+    if (focus) {
+      requestAnimationFrame(() => {
+        projectConfigurationRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        projectNameRef.current?.focus({ preventScroll: true });
+      });
+    }
+
+    const nextId = await fetchNextProjectId().catch(() => "");
+    if (newProjectRequestRef.current !== requestId) return;
+
+    setForm((previous) => ({
+      ...previous,
+      project_id: nextId,
+    }));
+    setNewProjectLoading(false);
+  }, [fetchNextProjectId]);
 
   useEffect(() => {
     if (!selectedProjectId) {
@@ -162,10 +280,12 @@ export default function AdminProjectIntakePage() {
 
   useEffect(() => {
     void loadProjects();
-    void resetForNewProject();
-  }, []);
+    void resetForNewProject({ focus: false });
+  }, [loadProjects, resetForNewProject]);
 
   function hydrateForm(project: ProjectRegistryItem) {
+    newProjectRequestRef.current += 1;
+    setNewProjectLoading(false);
     const topics = Array.isArray(project.topics) ? project.topics : [];
     const presetTopics = topics.filter((topic) => TOPIC_OPTIONS.includes(topic));
     const customTopics = topics.filter((topic) => !TOPIC_OPTIONS.includes(topic)).join(", ");
@@ -182,6 +302,8 @@ export default function AdminProjectIntakePage() {
       roadmap: project.roadmap || "",
       topics: presetTopics,
       customTopics,
+      truthMapEnabled: Boolean(projectTruthMap(project)),
+      truthMapAnchors: projectTruthMap(project)?.anchors.map((anchor) => ({ ...anchor })) || [],
     });
     setMessage("");
     setErrorMessage("");
@@ -202,7 +324,21 @@ export default function AdminProjectIntakePage() {
       setMessage("");
       return;
     }
+    if (form.truthMapEnabled && !form.truthMapAnchors.length) {
+      setErrorMessage("Add at least one Truth Map anchor, or turn configured Truth Map off.");
+      setMessage("");
+      return;
+    }
+    if (
+      form.truthMapEnabled &&
+      form.truthMapAnchors.some((anchor) => !anchor.kind.trim() || !anchor.path.trim())
+    ) {
+      setErrorMessage("Every Truth Map anchor needs both a kind and a repository-relative file path.");
+      setMessage("");
+      return;
+    }
 
+    const wasEditing = Boolean(selectedProjectId);
     setSaving(true);
     setMessage("");
     setErrorMessage("");
@@ -221,17 +357,33 @@ export default function AdminProjectIntakePage() {
           current_state: form.current_state.trim(),
           roadmap: form.roadmap.trim(),
           topics: allTopics,
+          metadata: {
+            repo_context: {
+              truth_map: form.truthMapEnabled
+                ? {
+                    schema_version: 1,
+                    anchors: form.truthMapAnchors.map((anchor) => ({
+                      ...anchor,
+                      kind: anchor.kind.trim(),
+                      path: anchor.path.trim(),
+                    })),
+                  }
+                : null,
+            },
+          },
         }),
       });
 
       const data = (await response.json().catch(() => null)) as {
-        detail?: string;
+        detail?: ApiErrorDetail;
         message?: string;
         item?: ProjectRegistryItem;
         repo_snapshot?: ProjectRepoSnapshot;
       } | null;
       if (!response.ok) {
-        throw new Error(data?.detail || data?.message || `Failed to save project (${response.status})`);
+        throw new Error(
+          apiErrorMessage(data?.detail, data?.message || `Failed to save project (${response.status})`),
+        );
       }
 
       const savedProject = data?.item;
@@ -241,7 +393,7 @@ export default function AdminProjectIntakePage() {
       }
       setRepoSnapshot(data?.repo_snapshot || null);
 
-      setMessage("Project saved successfully.");
+      setMessage(wasEditing ? "Project changes saved successfully." : "Project created successfully.");
       await loadProjects();
     } catch (error) {
       console.error("Failed to save project:", error);
@@ -280,8 +432,13 @@ export default function AdminProjectIntakePage() {
   }
 
   async function handleRefreshSnapshot() {
-    const projectId = selectedProjectId || form.project_id.trim();
-    if (!projectId) return;
+    if (!selectedProjectId) {
+      setMessage("");
+      setErrorMessage("Create the project before refreshing its repo snapshot.");
+      return;
+    }
+
+    const projectId = selectedProjectId;
 
     setSnapshotRefreshing(true);
     setErrorMessage("");
@@ -299,7 +456,7 @@ export default function AdminProjectIntakePage() {
       setRepoSnapshot(data?.repo_snapshot || null);
       setMessage("Repo snapshot refreshed.");
     } catch (error) {
-      console.error("Failed to refresh repo snapshot:", error);
+      console.warn("Failed to refresh repo snapshot:", error);
       setErrorMessage(error instanceof Error ? error.message : "Failed to refresh repo snapshot.");
     } finally {
       setSnapshotRefreshing(false);
@@ -312,6 +469,53 @@ export default function AdminProjectIntakePage() {
       topics: prev.topics.includes(topic)
         ? prev.topics.filter((item) => item !== topic)
         : [...prev.topics, topic],
+    }));
+  }
+
+  function setTruthMapEnabled(enabled: boolean) {
+    setForm((previous) => ({
+      ...previous,
+      truthMapEnabled: enabled,
+      truthMapAnchors:
+        enabled && !previous.truthMapAnchors.length
+          ? [createDefaultTruthMapAnchor()]
+          : previous.truthMapAnchors,
+    }));
+  }
+
+  function addTruthMapAnchor() {
+    setForm((previous) => ({
+      ...previous,
+      truthMapAnchors: [
+        ...previous.truthMapAnchors,
+        {
+          kind: "roadmap",
+          path: "ROADMAP.md",
+          required: false,
+          content_mode: "excerpt",
+          max_chars: 1600,
+        },
+      ],
+    }));
+  }
+
+  function updateTruthMapAnchor(index: number, updates: Partial<TruthMapAnchor>) {
+    setForm((previous) => ({
+      ...previous,
+      truthMapAnchors: previous.truthMapAnchors.map((anchor, anchorIndex) => {
+        if (anchorIndex !== index) return anchor;
+        const next = { ...anchor, ...updates };
+        if (next.content_mode === "metadata_only") delete next.max_chars;
+        if (next.content_mode === "excerpt" && next.max_chars === undefined) next.max_chars = 1600;
+        return next;
+      }),
+    }));
+  }
+
+  function removeTruthMapAnchor(index: number) {
+    setForm((previous) => ({
+      ...previous,
+      truthMapAnchors: previous.truthMapAnchors.filter((_, anchorIndex) => anchorIndex !== index),
     }));
   }
 
@@ -375,6 +579,7 @@ export default function AdminProjectIntakePage() {
                       <span style={chipStyle}>{readableStatus(project.status)}</span>
                       <span style={chipStyle}>{project.enabled === false ? "hidden" : "listed"}</span>
                       {project.repo ? <span style={chipStyle}>repo linked</span> : null}
+                      {projectTruthMap(project) ? <span style={chipStyle}>truth map</span> : null}
                     </div>
                   </button>
                 ))
@@ -382,21 +587,60 @@ export default function AdminProjectIntakePage() {
             </div>
           </section>
 
-          <section style={panelStyle}>
-            <div style={sectionTitleStyle}>Project Configuration</div>
+          <section ref={projectConfigurationRef} style={panelStyle}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: "12px", alignItems: "start", flexWrap: "wrap" }}>
+              <div>
+                <div style={sectionTitleStyle}>{selectedProjectId ? "Edit Project" : "Create New Project"}</div>
+                {!selectedProjectId ? (
+                  <div style={{ marginTop: "8px", fontSize: "13px", color: "#0369a1", lineHeight: "1.6" }}>
+                    {newProjectLoading
+                      ? "Preparing a new project ID..."
+                      : "New project form is ready. Enter a project name, then select Create Project."}
+                  </div>
+                ) : null}
+              </div>
+              <button
+                type="button"
+                onClick={() => void handleSave()}
+                disabled={saving || newProjectLoading}
+                style={primaryButtonStyle}
+              >
+                {saving
+                  ? selectedProjectId
+                    ? "Saving..."
+                    : "Creating..."
+                  : selectedProjectId
+                    ? "Save Changes"
+                    : "Create Project"}
+              </button>
+            </div>
             <div style={{ marginTop: "8px", fontSize: "14px", color: "#64748b", lineHeight: "1.7" }}>
-              `Open Project Intelligence` means opening the next page that reads your saved project context and,
+              `Open Project Understanding` means opening the next page that reads your saved project context and,
               if a GitHub repo is connected, loads README, roadmap, and issues from GitHub.
             </div>
 
+            {message ? <div style={{ ...successNoticeStyle, marginTop: "12px" }}>{message}</div> : null}
+            {errorMessage ? <div style={{ ...errorNoticeStyle, marginTop: "12px" }}>{errorMessage}</div> : null}
+
             <div style={{ marginTop: "12px", display: "grid", gap: "14px" }}>
               <Field label="Project ID">
-                <input value={form.project_id} readOnly style={{ ...inputStyle, background: "#f8fafc", color: "#64748b" }} />
+                <input
+                  value={form.project_id}
+                  readOnly
+                  style={{ ...inputStyle, background: "#f8fafc", color: "#64748b" }}
+                  placeholder={newProjectLoading ? "Generating..." : "Generated automatically"}
+                />
               </Field>
 
               <div style={{ display: "grid", gridTemplateColumns: "1.5fr 0.8fr", gap: "14px" }}>
                 <Field label="Project Name">
-                  <input value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} style={inputStyle} placeholder="AI Radar" />
+                  <input
+                    ref={projectNameRef}
+                    value={form.name}
+                    onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
+                    style={inputStyle}
+                    placeholder="Enter a project name"
+                  />
                 </Field>
 
                 <Field label="Status">
@@ -426,24 +670,157 @@ export default function AdminProjectIntakePage() {
                 <input value={form.repo} onChange={(e) => setForm((prev) => ({ ...prev, repo: e.target.value }))} style={inputStyle} placeholder="owner/repo or https://github.com/owner/repo" />
               </Field>
 
+              <section style={truthMapPanelStyle}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: "12px", flexWrap: "wrap" }}>
+                  <div>
+                    <div style={smallTitleStyle}>Repository Truth Map</div>
+                    <div style={{ marginTop: "6px", fontSize: "13px", color: "#64748b", lineHeight: 1.6 }}>
+                      Declare the exact repository files AI Radar should read as project context. This does not verify
+                      their claims or change Project Takeaway eligibility.
+                    </div>
+                  </div>
+                  <label style={{ display: "flex", gap: "8px", alignItems: "center", fontSize: "13px", color: "#374151" }}>
+                    <input
+                      type="checkbox"
+                      checked={form.truthMapEnabled}
+                      onChange={(event) => setTruthMapEnabled(event.target.checked)}
+                    />
+                    Use configured Truth Map
+                  </label>
+                </div>
+
+                <div style={truthMapWorkflowNoteStyle}>
+                  Save Changes stores this configuration. Refresh Light Snapshot then reads the saved anchors; refresh
+                  does not require another save afterward.
+                </div>
+
+                <div style={{ fontSize: "12px", color: "var(--app-text-muted)", lineHeight: 1.6 }}>
+                  Development Reality reads excerpt anchors named <code>current_state</code> and <code>development_plan</code>.
+                  Use the exact repository files that own current execution status and the active plan.
+                </div>
+
+                {form.truthMapEnabled ? (
+                  <div style={{ display: "grid", gap: "10px" }}>
+                    {form.truthMapAnchors.map((anchor, index) => (
+                      <div key={index} style={truthMapAnchorStyle}>
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: "10px", alignItems: "center" }}>
+                          <strong style={{ fontSize: "13px", color: "#111827" }}>Anchor {index + 1}</strong>
+                          <button
+                            type="button"
+                            onClick={() => removeTruthMapAnchor(index)}
+                            style={compactDangerButtonStyle}
+                          >
+                            Remove
+                          </button>
+                        </div>
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "10px" }}>
+                          <Field label="Kind">
+                            <input
+                              value={anchor.kind}
+                              onChange={(event) => updateTruthMapAnchor(index, { kind: event.target.value })}
+                              style={inputStyle}
+                              placeholder="product_spec"
+                            />
+                          </Field>
+                          <Field label="Repository-relative file path">
+                            <input
+                              value={anchor.path}
+                              onChange={(event) => updateTruthMapAnchor(index, { path: event.target.value })}
+                              style={inputStyle}
+                              placeholder="docs/product.md"
+                            />
+                          </Field>
+                        </div>
+                        <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", alignItems: "end" }}>
+                          <Field label="Content mode">
+                            <select
+                              value={anchor.content_mode}
+                              onChange={(event) =>
+                                updateTruthMapAnchor(index, {
+                                  content_mode: event.target.value as TruthMapAnchor["content_mode"],
+                                })
+                              }
+                              style={{ ...inputStyle, minWidth: "160px" }}
+                            >
+                              <option value="excerpt">Bounded excerpt</option>
+                              <option value="metadata_only">Metadata only</option>
+                            </select>
+                          </Field>
+                          {anchor.content_mode === "excerpt" ? (
+                            <Field label="Excerpt characters">
+                              <input
+                                type="number"
+                                min={400}
+                                max={4000}
+                                value={anchor.max_chars || 1600}
+                                onChange={(event) =>
+                                  updateTruthMapAnchor(index, { max_chars: Number(event.target.value) })
+                                }
+                                style={{ ...inputStyle, width: "150px" }}
+                              />
+                            </Field>
+                          ) : null}
+                          <label style={{ display: "flex", gap: "8px", alignItems: "center", minHeight: "43px", fontSize: "13px", color: "#374151" }}>
+                            <input
+                              type="checkbox"
+                              checked={anchor.required}
+                              onChange={(event) => updateTruthMapAnchor(index, { required: event.target.checked })}
+                            />
+                            Required anchor
+                          </label>
+                        </div>
+                      </div>
+                    ))}
+                    <button type="button" onClick={addTruthMapAnchor} style={{ ...secondaryButtonStyle, justifySelf: "start" }}>
+                      Add Truth Anchor
+                    </button>
+                  </div>
+                ) : (
+                  <div style={{ fontSize: "13px", color: "#64748b" }}>
+                    Heuristic discovery remains active until a Truth Map is enabled and saved.
+                  </div>
+                )}
+              </section>
+
               <section style={snapshotPanelStyle}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: "12px", flexWrap: "wrap" }}>
                   <div>
                     <div style={smallTitleStyle}>Repo Snapshot</div>
                     <div style={{ marginTop: "6px", display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                      <span style={chipStyle}>{snapshotLoading ? "loading" : readableSnapshotStatus(repoSnapshot?.status)}</span>
+                      <span style={chipStyle}>
+                        {!selectedProjectId
+                          ? "save project first"
+                          : snapshotLoading
+                            ? "loading"
+                            : readableSnapshotStatus(repoSnapshot?.status)}
+                      </span>
                       {repoSnapshot?.repo ? <span style={chipStyle}>{repoSnapshot.repo}</span> : null}
                       {repoSnapshot?.scanned_at ? <span style={chipStyle}>scanned {formatCompactDate(repoSnapshot.scanned_at)}</span> : null}
+                      {repoSnapshot?.discovery ? (
+                        <span style={chipStyle}>{readableDiscoveryStatus(repoSnapshot.discovery)}</span>
+                      ) : null}
+                      {repoSnapshot?.schema_version === 2 ? <span style={chipStyle}>snapshot v2</span> : null}
+                      {repoSnapshot?.observation?.head?.sha ? (
+                        <span style={chipStyle}>head {shortSha(repoSnapshot.observation.head.sha)}</span>
+                      ) : null}
+                      {repoSnapshot?.observation?.baseline?.sha ? (
+                        <span style={chipStyle}>baseline {shortSha(repoSnapshot.observation.baseline.sha)}</span>
+                      ) : null}
+                      {repoSnapshot?.delta?.status ? <span style={chipStyle}>delta {repoSnapshot.delta.status}</span> : null}
                     </div>
                   </div>
                   <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "start" }}>
                     <button
                       type="button"
                       onClick={() => void handleRefreshSnapshot()}
-                      disabled={!form.project_id.trim() || snapshotRefreshing}
+                      disabled={!selectedProjectId || snapshotRefreshing}
                       style={secondaryButtonStyle}
                     >
-                      {snapshotRefreshing ? "Refreshing..." : "Refresh Light Snapshot"}
+                      {snapshotRefreshing
+                        ? "Refreshing..."
+                        : selectedProjectId
+                          ? "Refresh Light Snapshot"
+                          : "Save Project Before Refresh"}
                     </button>
                     <button type="button" disabled style={{ ...secondaryButtonStyle, color: "#94a3b8", cursor: "not-allowed" }}>
                       Run Deep Scan
@@ -452,6 +829,12 @@ export default function AdminProjectIntakePage() {
                 </div>
 
                 {repoSnapshot?.message ? <div style={snapshotMessageStyle}>{repoSnapshot.message}</div> : null}
+
+                {repoSnapshot?.discovery?.config_status === "invalid" ? (
+                  <div style={snapshotConfigErrorStyle}>
+                    {repoSnapshot.discovery.config_errors?.[0]?.path || "Truth Map"}: {repoSnapshot.discovery.config_errors?.[0]?.message || "Configuration is invalid."}
+                  </div>
+                ) : null}
 
                 {repoSnapshot?.summary ? <div style={snapshotSummaryStyle}>{repoSnapshot.summary}</div> : null}
 
@@ -471,6 +854,68 @@ export default function AdminProjectIntakePage() {
                     ))}
                   </div>
                 ) : null}
+
+                {repoSnapshot?.delta ? (
+                  <div style={snapshotDeltaStyle}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: "8px", flexWrap: "wrap" }}>
+                      <span style={{ fontSize: "13px", fontWeight: 800, color: "var(--app-text-strong)" }}>Observed repository delta</span>
+                      {repoSnapshot.delta.from_sha || repoSnapshot.delta.to_sha ? (
+                        <span style={{ fontSize: "12px", color: "var(--app-text-subtle)" }}>
+                          {shortSha(repoSnapshot.delta.from_sha)} → {shortSha(repoSnapshot.delta.to_sha)}
+                        </span>
+                      ) : null}
+                    </div>
+                    {repoSnapshot.delta.message ? (
+                      <div style={{ fontSize: "12px", color: "var(--app-text-muted)", lineHeight: 1.6 }}>{repoSnapshot.delta.message}</div>
+                    ) : null}
+                    {repoSnapshot.delta.status === "changed" && repoSnapshot.delta.commits?.length ? (
+                      <div style={{ display: "grid", gap: "6px" }}>
+                        <div style={snapshotDeltaLabelStyle}>
+                          Commits ({repoSnapshot.delta.total_commits ?? repoSnapshot.delta.commits.length})
+                        </div>
+                        {repoSnapshot.delta.commits.map((commit, index) => (
+                          <div key={`${commit.sha || "commit"}-${index}`} style={snapshotDeltaRowStyle}>
+                            <span style={{ fontWeight: 700 }}>{shortSha(commit.sha)}</span>
+                            <span>{commit.message || "Commit message unavailable"}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                    {repoSnapshot.delta.status === "changed" && repoSnapshot.delta.files?.length ? (
+                      <div style={{ display: "grid", gap: "6px" }}>
+                        <div style={snapshotDeltaLabelStyle}>Files ({repoSnapshot.delta.files.length})</div>
+                        {repoSnapshot.delta.files.map((file, index) => (
+                          <div key={`${file.path || "file"}-${index}`} style={snapshotDeltaRowStyle}>
+                            <span style={{ fontWeight: 700 }}>{file.status || "changed"}</span>
+                            <span>{file.path || "Path unavailable"}</span>
+                            {typeof file.changes === "number" ? <span>{file.changes} lines</span> : null}
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                    {repoSnapshot.delta.truncated ? (
+                      <div style={{ fontSize: "12px", color: "var(--app-warning-fg)" }}>Delta display is bounded; additional changes were omitted.</div>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {repoSnapshot?.anchors?.length ? (
+                  <div style={{ display: "grid", gap: "8px" }}>
+                    <div style={{ fontSize: "13px", fontWeight: 800, color: "#475569" }}>Observed truth anchors</div>
+                    {repoSnapshot.anchors.map((anchor, index) => (
+                      <div key={`${anchor.path || "anchor"}-${index}`} style={snapshotAnchorRowStyle}>
+                        <span style={{ fontWeight: 700 }}>{anchor.kind || "anchor"}</span>
+                        <span style={{ color: "#64748b" }}>{anchor.path || "path unavailable"}</span>
+                        <span style={chipStyle}>{anchor.required ? "required" : "optional"}</span>
+                        <span style={chipStyle}>{anchor.found ? "found" : anchor.error || "missing"}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+
+                <div style={{ fontSize: "12px", color: "#64748b", lineHeight: 1.6 }}>
+                  Repo Snapshot is project review context only. It does not verify external claims or unlock downstream actions.
+                </div>
               </section>
 
               <Field label="Focus Tags">
@@ -513,8 +958,14 @@ export default function AdminProjectIntakePage() {
               </label>
 
               <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
-                <button onClick={() => void handleSave()} disabled={saving} style={primaryButtonStyle}>
-                  {saving ? "Saving..." : "Save Project"}
+                <button onClick={() => void handleSave()} disabled={saving || newProjectLoading} style={primaryButtonStyle}>
+                  {saving
+                    ? selectedProjectId
+                      ? "Saving..."
+                      : "Creating..."
+                    : selectedProjectId
+                      ? "Save Changes"
+                      : "Create Project"}
                 </button>
 
                 {selectedProjectId ? (
@@ -523,15 +974,13 @@ export default function AdminProjectIntakePage() {
                   </button>
                 ) : null}
 
-                {form.project_id.trim() ? (
-                  <Link href={`/workspace/projects?project_id=${encodeURIComponent(form.project_id.trim())}`} style={secondaryLinkStyle}>
-                    Open Project Intelligence
+                {selectedProjectId ? (
+                  <Link href={`/workspace/projects/intelligence?project_id=${encodeURIComponent(selectedProjectId)}`} style={secondaryLinkStyle}>
+                    Open Project Understanding
                   </Link>
                 ) : null}
               </div>
 
-              {message ? <div style={successNoticeStyle}>{message}</div> : null}
-              {errorMessage ? <div style={errorNoticeStyle}>{errorMessage}</div> : null}
             </div>
           </section>
         </div>
@@ -561,6 +1010,12 @@ function readableSnapshotStatus(value?: string) {
   }
 }
 
+function readableDiscoveryStatus(discovery: NonNullable<ProjectRepoSnapshot["discovery"]>) {
+  if (discovery.config_status === "invalid") return "truth map invalid";
+  if (discovery.mode === "configured") return "configured truth map";
+  return "heuristic discovery";
+}
+
 function formatCompactDate(value?: string) {
   if (!value) return "";
   try {
@@ -568,6 +1023,11 @@ function formatCompactDate(value?: string) {
   } catch {
     return value;
   }
+}
+
+function shortSha(value?: string) {
+  const normalized = (value || "").trim();
+  return normalized ? normalized.slice(0, 8) : "—";
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
@@ -611,6 +1071,64 @@ const snapshotPanelStyle = {
   gap: "12px",
 } as const;
 
+const truthMapPanelStyle = {
+  border: "1px solid #dbeafe",
+  borderRadius: "14px",
+  background: "#f8fafc",
+  padding: "14px",
+  display: "grid",
+  gap: "12px",
+} as const;
+
+const truthMapWorkflowNoteStyle = {
+  border: "1px solid #bfdbfe",
+  borderRadius: "10px",
+  background: "#eff6ff",
+  padding: "10px 12px",
+  color: "#1e3a8a",
+  fontSize: "12px",
+  lineHeight: 1.6,
+} as const;
+
+const truthMapAnchorStyle = {
+  border: "1px solid #e5e7eb",
+  borderRadius: "10px",
+  background: "#ffffff",
+  padding: "12px",
+  display: "grid",
+  gap: "10px",
+} as const;
+
+const compactDangerButtonStyle = {
+  border: "0",
+  background: "transparent",
+  color: "#b91c1c",
+  cursor: "pointer",
+  fontSize: "12px",
+  fontWeight: 700,
+} as const;
+
+const snapshotConfigErrorStyle = {
+  border: "1px solid var(--app-danger-border)",
+  borderRadius: "10px",
+  background: "var(--app-danger-bg)",
+  color: "var(--app-danger-fg)",
+  padding: "10px 12px",
+  fontSize: "12px",
+  lineHeight: 1.6,
+} as const;
+
+const snapshotAnchorRowStyle = {
+  display: "flex",
+  gap: "8px",
+  flexWrap: "wrap" as const,
+  alignItems: "center",
+  borderTop: "1px solid #e5e7eb",
+  paddingTop: "8px",
+  fontSize: "12px",
+  color: "#111827",
+} as const;
+
 const snapshotMessageStyle = {
   fontSize: "13px",
   lineHeight: 1.6,
@@ -631,6 +1149,33 @@ const snapshotListStyle = {
   display: "flex",
   gap: "8px",
   flexWrap: "wrap" as const,
+} as const;
+
+const snapshotDeltaStyle = {
+  border: "1px solid var(--app-surface-border)",
+  borderRadius: "12px",
+  background: "var(--app-surface-muted-bg)",
+  padding: "12px",
+  display: "grid",
+  gap: "10px",
+} as const;
+
+const snapshotDeltaLabelStyle = {
+  fontSize: "12px",
+  fontWeight: 800,
+  color: "var(--app-text-subtle)",
+  textTransform: "uppercase" as const,
+} as const;
+
+const snapshotDeltaRowStyle = {
+  display: "flex",
+  gap: "8px",
+  flexWrap: "wrap" as const,
+  alignItems: "center",
+  borderTop: "1px solid var(--app-surface-border)",
+  paddingTop: "6px",
+  fontSize: "12px",
+  color: "var(--app-text-muted)",
 } as const;
 
 const chipStyle = {
@@ -749,19 +1294,21 @@ const toolbarSecondaryLinkStyle = {
 } as const;
 
 const successNoticeStyle = {
-  border: "1px solid #bbf7d0",
-  background: "#ecfdf3",
-  color: "#166534",
+  border: "1px solid var(--app-success-border)",
+  background: "var(--app-success-bg)",
+  color: "var(--app-success-fg)",
   borderRadius: "12px",
   padding: "12px 14px",
   fontSize: "13px",
+  fontWeight: 700,
 } as const;
 
 const errorNoticeStyle = {
-  border: "1px solid #fecaca",
-  background: "#fff1f2",
-  color: "#be123c",
+  border: "1px solid var(--app-danger-border)",
+  background: "var(--app-danger-bg)",
+  color: "var(--app-danger-fg)",
   borderRadius: "12px",
   padding: "12px 14px",
   fontSize: "13px",
+  fontWeight: 700,
 } as const;

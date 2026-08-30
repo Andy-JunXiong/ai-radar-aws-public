@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -8,11 +9,16 @@ from typing import Any
 from app.services.github_project_reader import (
     GitHubRequestError,
     fetch_project_github_context,
+    fetch_repo_compare,
+    fetch_repo_head,
     fetch_repo_manifest_files,
+    fetch_repo_metadata,
     fetch_repo_recent_commits,
     fetch_repo_top_level_tree,
+    fetch_repo_truth_map_anchors,
     normalize_repo_name,
 )
+from app.services.project_truth_map_service import resolve_project_truth_map
 
 
 BASE_DIR = Path(__file__).resolve().parents[2] / "data"
@@ -46,6 +52,35 @@ def _first_paragraph(value: Any) -> str:
         return ""
     paragraphs = [item.strip() for item in text.split("\n\n") if item.strip()]
     return _truncate(paragraphs[0] if paragraphs else text, 420)
+
+
+def _deterministic_summary(primary: Any, fallback: Any = "") -> str:
+    text = _safe_text(primary)
+    if not text:
+        return _truncate(fallback, 500)
+
+    paragraphs: list[str] = []
+    current: list[str] = []
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            if current:
+                paragraphs.append(" ".join(current))
+                current = []
+            continue
+        if line.startswith(("```", "#", ">", "![", "[![")):
+            continue
+        if line.startswith(("- ", "* ")):
+            line = line[2:].strip()
+        line = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", line)
+        line = line.replace("**", "").replace("__", "").replace("`", "").strip()
+        if line:
+            current.append(line)
+    if current:
+        paragraphs.append(" ".join(current))
+
+    useful = next((paragraph for paragraph in paragraphs if len(paragraph) >= 40), None)
+    return _truncate(useful or (paragraphs[0] if paragraphs else fallback), 500)
 
 
 def _architecture_hints(tree: list[dict[str, Any]], manifests: list[dict[str, Any]]) -> list[str]:
@@ -122,6 +157,7 @@ def _has_snapshot_context(snapshot: dict[str, Any]) -> bool:
         or snapshot.get("top_level_tree")
         or snapshot.get("recent_commits")
         or snapshot.get("manifests")
+        or snapshot.get("anchors")
     )
 
 
@@ -165,8 +201,8 @@ def load_project_repo_snapshot(project_id: str, *, include_freshness: bool = Tru
 
 def save_project_repo_snapshot(project_id: str, snapshot: dict[str, Any]) -> dict[str, Any]:
     payload = {
-        "schema_version": 1,
         **snapshot,
+        "schema_version": 2,
         "project_id": project_id,
     }
     _snapshot_path(project_id).write_text(
@@ -176,12 +212,421 @@ def save_project_repo_snapshot(project_id: str, snapshot: dict[str, Any]) -> dic
     return payload
 
 
+def _fetch_head(repo: str, default_branch: str = "") -> tuple[dict[str, Any], list[str]]:
+    try:
+        head = fetch_repo_head(repo, default_branch=default_branch)
+    except GitHubRequestError as exc:
+        return {}, [f"head: {exc.kind}"]
+    if not head:
+        return {}, ["head: unavailable"]
+    return head, []
+
+
+def _previous_successful_head(previous_snapshot: Any, repo: str) -> dict[str, Any] | None:
+    if not isinstance(previous_snapshot, dict):
+        return None
+    if normalize_repo_name(_safe_text(previous_snapshot.get("repo"))) != normalize_repo_name(repo):
+        return None
+    observation = previous_snapshot.get("observation")
+    if not isinstance(observation, dict):
+        return None
+    delta = previous_snapshot.get("delta") if isinstance(previous_snapshot.get("delta"), dict) else {}
+    delta_status = _safe_text(delta.get("status"))
+    candidate_order = ("head", "baseline") if delta_status in {"initial", "unchanged", "changed"} else ("baseline", "head")
+    for key in candidate_order:
+        candidate = observation.get(key)
+        if isinstance(candidate, dict) and _safe_text(candidate.get("sha")):
+            return {
+                "sha": _safe_text(candidate.get("sha")),
+                "branch": _safe_text(candidate.get("branch")),
+                "committed_at": candidate.get("committed_at"),
+                "scanned_at": candidate.get("scanned_at") or previous_snapshot.get("scanned_at"),
+            }
+    return None
+
+
+def _build_snapshot_delta(
+    repo: str,
+    *,
+    scanned_at: str,
+    previous_snapshot: Any,
+    head: dict[str, Any],
+) -> tuple[dict[str, Any] | None, dict[str, Any], list[str]]:
+    current_sha = _safe_text(head.get("sha"))
+    previous_head = _previous_successful_head(previous_snapshot, repo)
+    if not current_sha:
+        return (
+            previous_head,
+            {
+                "status": "unavailable",
+                "from_sha": _safe_text((previous_head or {}).get("sha")),
+                "to_sha": "",
+                "commits": [],
+                "files": [],
+                "truncated": False,
+                "message": "Current repository head is unavailable.",
+            },
+            [],
+        )
+
+    if not previous_head:
+        baseline = {**head, "scanned_at": scanned_at}
+        return (
+            baseline,
+            {
+                "status": "initial",
+                "from_sha": current_sha,
+                "to_sha": current_sha,
+                "commits": [],
+                "files": [],
+                "truncated": False,
+                "message": "Initial Snapshot v2 baseline recorded.",
+            },
+            [],
+        )
+
+    previous_sha = _safe_text(previous_head.get("sha"))
+    if previous_sha == current_sha:
+        return (
+            previous_head,
+            {
+                "status": "unchanged",
+                "from_sha": previous_sha,
+                "to_sha": current_sha,
+                "commits": [],
+                "files": [],
+                "truncated": False,
+                "message": "Repository head is unchanged since the previous successful refresh.",
+            },
+            [],
+        )
+
+    try:
+        comparison = fetch_repo_compare(repo, previous_sha, current_sha)
+    except GitHubRequestError as exc:
+        comparison = {}
+        compare_error = exc.kind
+    else:
+        compare_error = "unavailable" if not comparison else ""
+
+    if not comparison:
+        return (
+            previous_head,
+            {
+                "status": "unavailable",
+                "from_sha": previous_sha,
+                "to_sha": current_sha,
+                "commits": [],
+                "files": [],
+                "truncated": False,
+                "message": "Repository changed, but the bounded GitHub comparison is unavailable.",
+            },
+            [f"delta: {compare_error}"],
+        )
+
+    return (
+        previous_head,
+        {
+            "status": "changed",
+            "from_sha": previous_sha,
+            "to_sha": current_sha,
+            "compare_status": comparison.get("compare_status"),
+            "ahead_by": comparison.get("ahead_by"),
+            "behind_by": comparison.get("behind_by"),
+            "total_commits": comparison.get("total_commits"),
+            "commits": comparison.get("commits") or [],
+            "files": comparison.get("files") or [],
+            "truncated": bool(comparison.get("truncated")),
+            "html_url": comparison.get("html_url"),
+            "message": "Repository changes observed since the previous successful refresh.",
+        },
+        [],
+    )
+
+
+def _snapshot_v2_sections(
+    *,
+    repo: str,
+    scanned_at: str,
+    previous_snapshot: Any,
+    head: dict[str, Any],
+    anchors: list[dict[str, Any]],
+    repository: dict[str, Any],
+    tree: list[dict[str, Any]],
+    commits: list[dict[str, Any]],
+    manifests: list[dict[str, Any]],
+    summary: str,
+    architecture_hints: list[str],
+    keywords: list[str],
+) -> tuple[dict[str, Any], list[str]]:
+    current_head = {**head, "scanned_at": scanned_at} if head else {}
+    baseline, delta, delta_errors = _build_snapshot_delta(
+        repo,
+        scanned_at=scanned_at,
+        previous_snapshot=previous_snapshot,
+        head=current_head,
+    )
+    return (
+        {
+            "observation": {
+                "head": current_head or None,
+                "baseline": baseline,
+                "anchors": anchors,
+                "repository": repository or None,
+                "top_level_tree": tree,
+                "recent_commits": commits,
+                "manifests": manifests,
+            },
+            "interpretation": {
+                "method": "deterministic_v1",
+                "summary": summary,
+                "architecture_hints": architecture_hints,
+                "keywords": keywords,
+            },
+            "delta": delta,
+        },
+        delta_errors,
+    )
+
+
+def _repository_summary(metadata: dict[str, Any]) -> dict[str, Any]:
+    if not metadata:
+        return {}
+    return {
+        "full_name": metadata.get("full_name"),
+        "description": metadata.get("description"),
+        "default_branch": metadata.get("default_branch"),
+        "html_url": metadata.get("html_url"),
+        "open_issues_count": metadata.get("open_issues_count"),
+        "updated_at": metadata.get("updated_at"),
+    }
+
+
+def _fetch_basic_repo_sections(
+    repo: str,
+) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]], dict[str, Any], list[str]]:
+    metadata: dict[str, Any] = {}
+    tree: list[dict[str, Any]] = []
+    commits: list[dict[str, Any]] = []
+    errors: list[str] = []
+    for label, fetcher in (
+        ("repository", lambda: fetch_repo_metadata(repo)),
+        ("top_level_tree", lambda: fetch_repo_top_level_tree(repo)),
+        ("recent_commits", lambda: fetch_repo_recent_commits(repo)),
+    ):
+        try:
+            value = fetcher()
+        except GitHubRequestError as exc:
+            errors.append(f"{label}: {exc.kind}")
+            value = {} if label == "repository" else []
+        if label == "repository":
+            metadata = value
+        elif label == "top_level_tree":
+            tree = value
+        else:
+            commits = value
+    head, head_errors = _fetch_head(repo, _safe_text(metadata.get("default_branch")))
+    return metadata, tree, commits, head, [*errors, *head_errors]
+
+
+def _build_configured_project_repo_snapshot(
+    project: dict[str, Any],
+    *,
+    repo: str,
+    scanned_at: str,
+    discovery: dict[str, Any],
+    previous_snapshot: Any,
+) -> dict[str, Any]:
+    metadata, tree, commits, head, section_errors = _fetch_basic_repo_sections(repo)
+    truth_map = discovery.get("truth_map") if isinstance(discovery.get("truth_map"), dict) else {}
+    anchor_result = fetch_repo_truth_map_anchors(repo, truth_map.get("anchors") or [])
+    anchors = anchor_result.get("anchors") if isinstance(anchor_result.get("anchors"), list) else []
+    anchor_errors = anchor_result.get("errors") if isinstance(anchor_result.get("errors"), list) else []
+    found_anchors = [anchor for anchor in anchors if anchor.get("found")]
+    has_context = bool(metadata or tree or commits or found_anchors or head)
+
+    readme = next((anchor for anchor in anchors if anchor.get("kind") == "readme" and anchor.get("found")), None)
+    roadmap = next((anchor for anchor in anchors if anchor.get("kind") == "roadmap" and anchor.get("found")), None)
+    manifests = [
+        {
+            "path": anchor.get("path"),
+            "html_url": anchor.get("html_url"),
+            "excerpt": anchor.get("excerpt", ""),
+        }
+        for anchor in anchors
+        if anchor.get("found") and "manifest" in str(anchor.get("kind") or "")
+    ]
+    repository = _repository_summary(metadata)
+    summary = _deterministic_summary(
+        repository.get("description") or (readme or {}).get("excerpt"),
+        project.get("description") if has_context else "",
+    )
+    architecture_hints = _architecture_hints(tree, manifests)
+    keywords = _keywords(project, {"repository": repository}, tree, manifests)
+    v2_sections, delta_errors = _snapshot_v2_sections(
+        repo=repo,
+        scanned_at=scanned_at,
+        previous_snapshot=previous_snapshot,
+        head=head,
+        anchors=anchors,
+        repository=repository,
+        tree=tree,
+        commits=commits,
+        manifests=manifests,
+        summary=summary,
+        architecture_hints=architecture_hints,
+        keywords=keywords,
+    )
+    all_errors = [*section_errors, *anchor_errors, *delta_errors]
+    required_missing = [anchor.get("path") for anchor in anchors if anchor.get("required") and not anchor.get("found")]
+    if not has_context:
+        status = "failed"
+        message = "Configured Truth Map snapshot could not load usable repository context."
+    elif required_missing or all_errors:
+        status = "partial"
+        reasons: list[str] = []
+        if required_missing:
+            reasons.append(f"Required anchors missing: {', '.join(str(path) for path in required_missing)}.")
+        if all_errors:
+            reasons.append(f"Unavailable sections: {', '.join(str(item) for item in all_errors)}.")
+        message = f"Configured Truth Map snapshot partially loaded. {' '.join(reasons)}".strip()
+    else:
+        status = "fresh"
+        message = "Configured Truth Map snapshot generated successfully."
+    github_status = "loaded" if status == "fresh" else ("partial" if has_context else "unreachable")
+
+    return save_project_repo_snapshot(
+        _safe_text(project.get("project_id")),
+        {
+            "status": status,
+            "repo": repo,
+            "scanned_at": scanned_at,
+            "message": message,
+            "summary": summary,
+            "readme_found": bool(readme),
+            "readme_path": (readme or {}).get("path", ""),
+            "readme_excerpt": (readme or {}).get("excerpt", ""),
+            "roadmap_found": bool(roadmap),
+            "roadmap_path": (roadmap or {}).get("path", ""),
+            "roadmap_excerpt": (roadmap or {}).get("excerpt", ""),
+            "architecture_hints": architecture_hints,
+            "keywords": keywords,
+            "top_level_tree": tree,
+            "recent_commits": commits,
+            "manifests": manifests,
+            "anchors": anchors,
+            "discovery": {
+                "mode": "configured",
+                "config_status": "valid",
+                "config_errors": [],
+            },
+            "github": {
+                "status": github_status,
+                "message": message,
+                "repository": repository or None,
+            },
+            "optional_section_errors": all_errors,
+            **v2_sections,
+        },
+    )
+
+
+def _build_invalid_config_project_repo_snapshot(
+    project: dict[str, Any],
+    *,
+    repo: str,
+    scanned_at: str,
+    discovery: dict[str, Any],
+    previous_snapshot: Any,
+) -> dict[str, Any]:
+    metadata, tree, commits, head, section_errors = _fetch_basic_repo_sections(repo)
+    repository = _repository_summary(metadata)
+    has_context = bool(repository or tree or commits or head)
+    status = "partial" if has_context else "failed"
+    message = "Truth Map configuration is invalid; heuristic document discovery was not used."
+
+    summary = _deterministic_summary(
+        repository.get("description"),
+        project.get("description") if has_context else "",
+    )
+    architecture_hints = _architecture_hints(tree, [])
+    keywords = _keywords(project, {"repository": repository}, tree, [])
+    v2_sections, delta_errors = _snapshot_v2_sections(
+        repo=repo,
+        scanned_at=scanned_at,
+        previous_snapshot=previous_snapshot,
+        head=head,
+        anchors=[],
+        repository=repository,
+        tree=tree,
+        commits=commits,
+        manifests=[],
+        summary=summary,
+        architecture_hints=architecture_hints,
+        keywords=keywords,
+    )
+    all_errors = [*section_errors, *delta_errors]
+    if all_errors:
+        message = f"{message} Unavailable sections: {', '.join(all_errors)}."
+
+    return save_project_repo_snapshot(
+        _safe_text(project.get("project_id")),
+        {
+            "status": status,
+            "repo": repo,
+            "scanned_at": scanned_at,
+            "message": message,
+            "summary": summary,
+            "readme_found": False,
+            "readme_path": "",
+            "readme_excerpt": "",
+            "roadmap_found": False,
+            "roadmap_path": "",
+            "roadmap_excerpt": "",
+            "architecture_hints": architecture_hints,
+            "keywords": keywords,
+            "top_level_tree": tree,
+            "recent_commits": commits,
+            "manifests": [],
+            "anchors": [],
+            "discovery": {
+                "mode": "configured",
+                "config_status": "invalid",
+                "config_errors": discovery.get("config_errors") or [],
+            },
+            "github": {
+                "status": "partial" if has_context else "unreachable",
+                "message": message,
+                "repository": repository or None,
+            },
+            "optional_section_errors": all_errors,
+            **v2_sections,
+        },
+    )
+
+
 def build_light_project_repo_snapshot(project: dict[str, Any]) -> dict[str, Any]:
     project_id = _safe_text(project.get("project_id"))
     repo = normalize_repo_name(_safe_text(project.get("repo")))
     scanned_at = _utc_now_iso()
+    discovery = resolve_project_truth_map(project)
+    previous_snapshot = load_project_repo_snapshot(project_id, include_freshness=False)
 
     if not repo:
+        v2_sections, _ = _snapshot_v2_sections(
+            repo="",
+            scanned_at=scanned_at,
+            previous_snapshot=previous_snapshot,
+            head={},
+            anchors=[],
+            repository={},
+            tree=[],
+            commits=[],
+            manifests=[],
+            summary="",
+            architecture_hints=[],
+            keywords=[],
+        )
         return save_project_repo_snapshot(
             project_id,
             {
@@ -197,8 +642,32 @@ def build_light_project_repo_snapshot(project: dict[str, Any]) -> dict[str, Any]
                 "top_level_tree": [],
                 "recent_commits": [],
                 "manifests": [],
+                "anchors": [],
+                "discovery": {
+                    "mode": discovery.get("mode"),
+                    "config_status": discovery.get("config_status"),
+                    "config_errors": discovery.get("config_errors") or [],
+                },
                 "github": {"status": "no_repo"},
+                **v2_sections,
             },
+        )
+
+    if discovery.get("config_status") == "invalid":
+        return _build_invalid_config_project_repo_snapshot(
+            project,
+            repo=repo,
+            scanned_at=scanned_at,
+            discovery=discovery,
+            previous_snapshot=previous_snapshot,
+        )
+    if discovery.get("config_status") == "valid":
+        return _build_configured_project_repo_snapshot(
+            project,
+            repo=repo,
+            scanned_at=scanned_at,
+            discovery=discovery,
+            previous_snapshot=previous_snapshot,
         )
 
     github = fetch_project_github_context(repo)
@@ -228,35 +697,65 @@ def build_light_project_repo_snapshot(project: dict[str, Any]) -> dict[str, Any]
     readme = github.get("readme") if isinstance(github.get("readme"), dict) else {}
     roadmap = github.get("roadmap") if isinstance(github.get("roadmap"), dict) else {}
     has_partial_context = bool(repository or readme or roadmap or tree or commits or manifests)
+    head, head_errors = _fetch_head(repo, _safe_text(repository.get("default_branch")))
+    extra_errors.extend(head_errors)
+    has_partial_context = bool(has_partial_context or head)
+    summary = _deterministic_summary(
+        repository.get("description") or readme.get("content"),
+        project.get("description") if has_partial_context else "",
+    )
+    architecture_hints = _architecture_hints(tree, manifests)
+    keywords = _keywords(project, github, tree, manifests)
+    v2_sections, delta_errors = _snapshot_v2_sections(
+        repo=repo,
+        scanned_at=scanned_at,
+        previous_snapshot=previous_snapshot,
+        head=head,
+        anchors=[],
+        repository=repository,
+        tree=tree,
+        commits=commits,
+        manifests=manifests,
+        summary=summary,
+        architecture_hints=architecture_hints,
+        keywords=keywords,
+    )
+    extra_errors.extend(delta_errors)
     status, message = _status_from_github(github, repo, has_partial_context=has_partial_context)
     if extra_errors and status in {"fresh", "partial"}:
+        status = "partial"
         message = f"{message} Some optional snapshot sections were unavailable: {', '.join(extra_errors)}."
-
-    summary_source = repository.get("description") or _first_paragraph(readme.get("content")) or _safe_text(project.get("description"))
 
     snapshot = {
         "status": status,
         "repo": repo,
         "scanned_at": scanned_at,
         "message": message,
-        "summary": _truncate(summary_source, 500),
+        "summary": summary,
         "readme_found": bool(readme),
         "readme_path": readme.get("path") if readme else "",
         "readme_excerpt": _truncate(readme.get("content"), 1600) if readme else "",
         "roadmap_found": bool(roadmap),
         "roadmap_path": roadmap.get("path") if roadmap else "",
         "roadmap_excerpt": _truncate(roadmap.get("content"), 1600) if roadmap else "",
-        "architecture_hints": _architecture_hints(tree, manifests),
-        "keywords": _keywords(project, github, tree, manifests),
+        "architecture_hints": architecture_hints,
+        "keywords": keywords,
         "top_level_tree": tree,
         "recent_commits": commits,
         "manifests": manifests,
+        "anchors": [],
+        "discovery": {
+            "mode": "heuristic",
+            "config_status": "absent",
+            "config_errors": [],
+        },
         "github": {
             "status": github.get("status"),
             "message": github.get("message"),
             "repository": repository or None,
         },
         "optional_section_errors": extra_errors,
+        **v2_sections,
     }
     return save_project_repo_snapshot(project_id, snapshot)
 

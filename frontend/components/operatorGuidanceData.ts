@@ -556,6 +556,7 @@ function currentSurfaceLabel(currentPath?: string) {
   if (path.startsWith("/signals")) return "Signals";
   if (path.startsWith("/friction-signals")) return "Friction Signals";
   if (path.startsWith("/watch-learning")) return "Watch Learning";
+  if (path.startsWith("/workspace/projects/intelligence")) return "Project Understanding";
   if (path.startsWith("/workspace/projects/review")) return "Project Review Inbox";
   if (path.startsWith("/manual")) return "Manual Upload";
   if (path.startsWith("/admin/background-update-candidates")) return "Background Update Candidates";

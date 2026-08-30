@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -51,6 +52,7 @@ from app.services.project_repo_snapshot_service import (
     load_project_repo_snapshot,
     maybe_refresh_project_repo_snapshot_after_save,
 )
+from app.services.project_truth_map_service import TruthMapValidationError, merge_project_metadata
 from app.services.rejected_learning_buffer_service import build_rejected_learning_buffer
 from app.services.project_takeaway_constants import (
     PROJECT_IMPROVEMENT_CLOSED_STATUSES,
@@ -203,6 +205,7 @@ class ProjectUpsertRequest(BaseModel):
     current_state: str = ""
     roadmap: str = ""
     topics: list[str] = []
+    metadata: dict[str, Any] | None = None
 
 
 class ProjectTakeawayCandidateRequest(BaseModel):
@@ -399,20 +402,30 @@ def save_project(payload: ProjectUpsertRequest):
     project_id = (payload.project_id or "").strip() or get_next_project_id()
     previous_project = get_project(project_id)
     previous_repo = str((previous_project or {}).get("repo") or "")
-    item = upsert_project(
-        project_id,
-        {
-            "name": payload.name,
-            "enabled": payload.enabled,
-            "status": payload.status,
-            "description": payload.description,
-            "repo": payload.repo,
-            "current_state": payload.current_state,
-            "roadmap": payload.roadmap,
-            "topics": payload.topics,
-            "source": "manual",
-        },
-    )
+    updates = {
+        "name": payload.name,
+        "enabled": payload.enabled,
+        "status": payload.status,
+        "description": payload.description,
+        "repo": payload.repo,
+        "current_state": payload.current_state,
+        "roadmap": payload.roadmap,
+        "topics": payload.topics,
+        "source": "manual",
+    }
+    if payload.metadata is not None:
+        try:
+            updates["metadata"] = merge_project_metadata(
+                (previous_project or {}).get("metadata"),
+                payload.metadata,
+            )
+        except TruthMapValidationError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={"code": "invalid_project_truth_map", "errors": exc.errors},
+            ) from exc
+
+    item = upsert_project(project_id, updates)
     snapshot = None
     try:
         snapshot = maybe_refresh_project_repo_snapshot_after_save(item, previous_repo=previous_repo)
@@ -965,7 +978,7 @@ def get_project_repo_snapshot(project_id: str):
     snapshot = load_project_repo_snapshot(project_id)
     if not snapshot:
         snapshot = {
-            "schema_version": 1,
+            "schema_version": 2,
             "project_id": project_id,
             "status": "missing",
             "repo": project.get("repo") or "",
