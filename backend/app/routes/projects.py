@@ -52,6 +52,7 @@ from app.services.project_repo_snapshot_service import (
     load_project_repo_snapshot,
     maybe_refresh_project_repo_snapshot_after_save,
 )
+from app.services.project_snapshot_change_review_service import build_project_snapshot_change_review
 from app.services.project_truth_map_service import TruthMapValidationError, merge_project_metadata
 from app.services.rejected_learning_buffer_service import build_rejected_learning_buffer
 from app.services.project_takeaway_constants import (
@@ -930,6 +931,11 @@ def backfill_project_calibration_events(project_id: str | None = Query(default=N
         **result,
         "message": "project calibration events backfilled successfully",
     }
+
+
+@router.get("/projects/repo-snapshot-changes", dependencies=[Depends(require_admin_auth)])
+def get_project_repo_snapshot_changes():
+    return build_project_snapshot_change_review(list_active_projects())
 
 
 @router.get("/projects/{project_id}")

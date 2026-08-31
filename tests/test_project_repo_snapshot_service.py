@@ -1,9 +1,10 @@
+import io
 import shutil
 import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -834,6 +835,120 @@ Durable product direction.
         self.assertEqual(len(comparison["files"]), 2)
         self.assertTrue(comparison["truncated"])
         self.assertEqual(github_request.call_count, 2)
+
+    def test_failed_refresh_retains_last_usable_snapshot_and_records_attempt(self):
+        first = service.save_project_repo_snapshot(
+            "ai_radar",
+            {
+                "status": "fresh",
+                "repo": "owner/repo",
+                "scanned_at": "2026-08-30T09:00:00+00:00",
+                "summary": "Last usable context",
+            },
+        )
+        retained = service.save_project_repo_snapshot(
+            "ai_radar",
+            {
+                "status": "failed",
+                "repo": "owner/repo",
+                "scanned_at": "2026-08-31T09:00:00+00:00",
+                "message": "GitHub rate limit reached.",
+            },
+        )
+
+        self.assertEqual(first["refresh"]["last_attempt_status"], "fresh")
+        self.assertEqual(retained["status"], "fresh")
+        self.assertEqual(retained["scanned_at"], "2026-08-30T09:00:00+00:00")
+        self.assertEqual(retained["summary"], "Last usable context")
+        self.assertEqual(retained["refresh"]["last_attempt_status"], "failed")
+        self.assertEqual(retained["refresh"]["last_succeeded_at"], "2026-08-30T09:00:00+00:00")
+        self.assertEqual(retained["refresh"]["last_failure"]["message"], "GitHub rate limit reached.")
+
+    def test_successful_refresh_clears_prior_failure(self):
+        service.save_project_repo_snapshot(
+            "ai_radar",
+            {
+                "status": "fresh",
+                "repo": "owner/repo",
+                "scanned_at": "2026-08-30T09:00:00+00:00",
+                "summary": "Old context",
+            },
+        )
+        service.save_project_repo_snapshot(
+            "ai_radar",
+            {
+                "status": "failed",
+                "repo": "owner/repo",
+                "scanned_at": "2026-08-31T08:00:00+00:00",
+                "message": "Temporary failure.",
+            },
+        )
+        recovered = service.save_project_repo_snapshot(
+            "ai_radar",
+            {
+                "status": "fresh",
+                "repo": "owner/repo",
+                "scanned_at": "2026-08-31T09:00:00+00:00",
+                "summary": "New context",
+            },
+        )
+
+        self.assertEqual(recovered["summary"], "New context")
+        self.assertEqual(recovered["refresh"]["last_attempt_status"], "fresh")
+        self.assertEqual(recovered["refresh"]["last_succeeded_at"], "2026-08-31T09:00:00+00:00")
+        self.assertIsNone(recovered["refresh"]["last_failure"])
+
+    def test_shared_load_prefers_s3_and_refreshes_local_cache(self):
+        client = MagicMock()
+        client.get_object.return_value = {
+            "Body": io.BytesIO(
+                b'{"status":"fresh","repo":"owner/repo","scanned_at":"2026-08-31T09:00:00+00:00"}'
+            )
+        }
+        with patch.dict(
+            service.os.environ,
+            {
+                "AI_RADAR_PROJECT_SNAPSHOT_S3_ENABLED": "true",
+                "S3_BUCKET": "test-bucket",
+                "AI_RADAR_S3_BUCKET": "test-bucket",
+                "AI_RADAR_USE_LOCAL_OUTPUT": "false",
+            },
+            clear=False,
+        ), patch.object(service, "_s3_client", return_value=client):
+            loaded = service.load_project_repo_snapshot("ai_radar")
+
+        self.assertEqual(loaded["repo"], "owner/repo")
+        self.assertTrue((self.temp_dir / "ai_radar.json").exists())
+        client.get_object.assert_called_once_with(
+            Bucket="test-bucket",
+            Key="project_repo_snapshots/ai_radar.json",
+        )
+
+    def test_shared_write_failure_is_not_reported_as_success(self):
+        client = MagicMock()
+        client.get_object.side_effect = RuntimeError("missing")
+        client.put_object.side_effect = RuntimeError("denied")
+        with patch.dict(
+            service.os.environ,
+            {
+                "AI_RADAR_PROJECT_SNAPSHOT_S3_ENABLED": "true",
+                "S3_BUCKET": "test-bucket",
+                "AI_RADAR_S3_BUCKET": "test-bucket",
+                "AI_RADAR_USE_LOCAL_OUTPUT": "false",
+            },
+            clear=False,
+        ), patch.object(service, "_s3_client", return_value=client):
+            with self.assertRaisesRegex(RuntimeError, "shared storage"):
+                service.save_project_repo_snapshot(
+                    "ai_radar",
+                    {
+                        "status": "fresh",
+                        "repo": "owner/repo",
+                        "scanned_at": "2026-08-31T09:00:00+00:00",
+                    },
+                )
+
+        self.assertFalse((self.temp_dir / "ai_radar.json").exists())
 
 
 if __name__ == "__main__":

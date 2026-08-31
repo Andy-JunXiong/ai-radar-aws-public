@@ -346,6 +346,9 @@ export default function ProjectTakeawaysPage() {
             <Link href="/workspace/projects/trajectory" style={toolbarPrimaryLinkStyle}>
               Trajectory Timeline
             </Link>
+            <Link href="/workspace/projects/changes" style={toolbarPrimaryLinkStyle}>
+              Project Changes
+            </Link>
             <Link href="/admin/projects" style={toolbarPrimaryLinkStyle}>
               Add or Manage Projects
             </Link>

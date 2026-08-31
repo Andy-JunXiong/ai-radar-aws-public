@@ -104,6 +104,12 @@ type ProjectRepoSnapshot = {
     message?: string;
     html_url?: string;
   };
+  refresh?: {
+    last_attempted_at?: string;
+    last_attempt_status?: string;
+    last_succeeded_at?: string;
+    last_failure?: { at?: string; message?: string } | null;
+  };
 };
 
 type ProjectRepoSnapshotResponse = {
@@ -829,6 +835,14 @@ export default function AdminProjectIntakePage() {
                 </div>
 
                 {repoSnapshot?.message ? <div style={snapshotMessageStyle}>{repoSnapshot.message}</div> : null}
+
+                {repoSnapshot?.refresh?.last_attempt_status === "failed" ? (
+                  <div style={snapshotConfigErrorStyle}>
+                    Latest Light Snapshot refresh failed {repoSnapshot.refresh.last_attempted_at ? `at ${formatCompactDate(repoSnapshot.refresh.last_attempted_at)}` : ""}.
+                    {repoSnapshot.refresh.last_failure?.message ? ` ${repoSnapshot.refresh.last_failure.message}` : ""}
+                    {repoSnapshot.refresh.last_succeeded_at ? ` Last successful snapshot: ${formatCompactDate(repoSnapshot.refresh.last_succeeded_at)}.` : ""}
+                  </div>
+                ) : null}
 
                 {repoSnapshot?.discovery?.config_status === "invalid" ? (
                   <div style={snapshotConfigErrorStyle}>

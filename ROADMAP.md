@@ -223,11 +223,20 @@ Light snapshot scope:
 
 - README excerpt
 - roadmap excerpt
+- configured Truth Map anchors with bounded excerpts or metadata-only reads
 - top-level repository tree
 - recent commits
 - manifest files
 - lightweight architecture hints
+- Snapshot v2 head, previous-success baseline, and bounded delta
 - cached snapshot status: `fresh`, `partial`, `stale`, `failed`, `missing`, or `not_connected`
+- daily freshness-loop code for active connected projects, with shared Snapshot
+  persistence and last-success preservation; the production EventBridge/ECS
+  schedule is enabled for a bounded daily light refresh, while the first
+  natural scheduled execution remains an operational validation step
+- read-only Project Change Review over cached snapshots, with cross-project
+  `changed`, `unchanged`, `attention`, and `unavailable` states and bounded
+  commit/file deltas; it does not trigger GitHub reads or writes
 
 Deep scan scope, not yet implemented:
 
@@ -327,6 +336,9 @@ Adjacent concepts from AI Systems Lab can inform AI Radar, but this repository s
 
 Current useful next slices:
 
+- Project Change Review production validation: verify the deployed read-only
+  cross-project view and the first natural daily light-refresh execution before
+  considering a broader scan
 - Today Overview runtime validation: the read-only, fail-closed five-state
   surface is implemented at `/dashboard`; validate its authenticated live-data
   states before taking the separate navigation-compression slice, without

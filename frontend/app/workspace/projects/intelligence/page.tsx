@@ -103,6 +103,12 @@ type ProjectRepoSnapshot = {
     truncated?: boolean;
     message?: string;
   };
+  refresh?: {
+    last_attempted_at?: string;
+    last_attempt_status?: string;
+    last_succeeded_at?: string;
+    last_failure?: { at?: string; message?: string } | null;
+  };
 };
 
 type ProjectIntelligenceResponse = {
@@ -221,11 +227,40 @@ function cleanDevelopmentItem(value: string) {
     .trim();
 }
 
+function markdownTableItems(lines: string[]) {
+  const tableLines = lines.filter((line) => line.startsWith("|") && line.includes("|", 1));
+  const result: string[] = [];
+  for (let index = 0; index < tableLines.length; index += 1) {
+    const cells = tableLines[index]
+      .replace(/^\|/, "")
+      .replace(/\|$/, "")
+      .split("|")
+      .map((cell) => cleanDevelopmentItem(cell))
+      .filter(Boolean);
+    if (!cells.length) continue;
+    const isSeparator = cells.every((cell) => /^:?-{3,}:?$/.test(cell.replace(/\s+/g, "")));
+    if (isSeparator) continue;
+    const nextLine = tableLines[index + 1] || "";
+    const nextCells = nextLine
+      .replace(/^\|/, "")
+      .replace(/\|$/, "")
+      .split("|")
+      .map((cell) => cell.trim())
+      .filter(Boolean);
+    const nextIsSeparator = nextCells.length > 0 && nextCells.every((cell) => /^:?-{3,}:?$/.test(cell.replace(/\s+/g, "")));
+    if (nextIsSeparator) continue;
+    const item = cells.slice(0, 2).join(" — ");
+    if (item && !result.includes(item)) result.push(item);
+  }
+  return result;
+}
+
 function compactDevelopmentItems(value: string) {
   const lines = value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   const headings = lines.filter((line) => /^#{1,6}\s+/.test(line));
   const bullets = lines.filter((line) => /^[-*+]\s+/.test(line));
-  const candidates = headings.length ? headings : bullets.length ? bullets : lines;
+  const tableItems = markdownTableItems(lines);
+  const candidates = headings.length ? headings : bullets.length ? bullets : tableItems.length ? tableItems : lines;
   const items: string[] = [];
   for (const candidate of candidates) {
     const cleaned = cleanDevelopmentItem(candidate);
@@ -321,8 +356,9 @@ export default function ProjectUnderstandingPreviewPage() {
 
         <div style={toolbarStyle}>
           <Link href={returnHref} style={primaryLinkStyle}>Back to Project Takeaways</Link>
+          <Link href="/workspace/projects/changes" style={secondaryLinkStyle}>Review Project Changes</Link>
           <Link href="/admin/projects" style={secondaryLinkStyle}>Manage Projects</Link>
-          <span style={toolbarNoteStyle}>Cached context only · no automatic repository refresh</span>
+          <span style={toolbarNoteStyle}>Cached snapshot · page loads never refresh GitHub</span>
         </div>
 
         {loading ? <div style={emptyStyle}>Loading cached project understanding...</div> : null}
@@ -347,6 +383,16 @@ export default function ProjectUnderstandingPreviewPage() {
               </div>
               <div>{snapshot?.message || "No snapshot status message is available."}</div>
             </section>
+
+            {snapshot?.refresh?.last_attempt_status === "failed" ? (
+              <section style={{ ...statusPanelStyle, borderColor: "#f59e0b", background: "#fffbeb", color: "#92400e" }}>
+                <strong>Latest Light Snapshot refresh failed</strong>
+                <div>
+                  Attempted {formatDate(snapshot.refresh.last_attempted_at)}. {snapshot.refresh.last_failure?.message || "No failure detail was recorded."}
+                </div>
+                <div>Showing the last successful snapshot from {formatDate(snapshot.refresh.last_succeeded_at || snapshot.scanned_at)}.</div>
+              </section>
+            ) : null}
 
             <div style={twoColumnStyle}>
               <section style={panelStyle}>
@@ -451,7 +497,7 @@ export default function ProjectUnderstandingPreviewPage() {
               </div>
               <p style={bodyTextStyle}>{snapshot?.delta?.message || "No bounded delta is available."}</p>
               {snapshot?.delta?.status === "changed" ? (
-                <div style={twoColumnStyle}>
+                <div style={deltaGridStyle}>
                   <DeltaList title={`Commits (${snapshot.delta.total_commits ?? deltaCommits.length})`} items={deltaCommits.map((commit) => `${shortSha(commit.sha)} · ${clean(commit.message) || "Message unavailable"}`)} />
                   <DeltaList title={`Files (${deltaFiles.length})`} items={deltaFiles.map((file) => `${clean(file.status) || "changed"} · ${clean(file.path) || "Path unavailable"}${typeof file.changes === "number" ? ` · ${file.changes} lines` : ""}`)} />
                 </div>
@@ -529,10 +575,20 @@ function DevelopmentRealityContent({ entry }: { entry: DevelopmentRealityEntry }
 }
 
 function DeltaList({ title, items }: { title: string; items: string[] }) {
+  const visibleItems = items.slice(0, 6);
+  const hiddenItems = items.slice(6);
   return (
-    <div style={contextBlockStyle}>
+    <div style={deltaListStyle}>
       <div style={labelStyle}>{title}</div>
-      {items.length ? items.map((item, index) => <div key={`${item}-${index}`} style={deltaRowStyle}>{item}</div>) : <div style={mutedTextStyle}>No cached items.</div>}
+      {visibleItems.length ? visibleItems.map((item, index) => <div key={`${item}-${index}`} style={deltaRowStyle}>{item}</div>) : <div style={mutedTextStyle}>No cached items.</div>}
+      {hiddenItems.length ? (
+        <details style={deltaDetailsStyle}>
+          <summary style={deltaSummaryStyle}>View {hiddenItems.length} more</summary>
+          <div style={deltaHiddenListStyle}>
+            {hiddenItems.map((item, index) => <div key={`${item}-${index + visibleItems.length}`} style={deltaRowStyle}>{item}</div>)}
+          </div>
+        </details>
+      ) : null}
     </div>
   );
 }
@@ -547,6 +603,7 @@ const sectionEyebrowStyle = { color: "var(--app-text-subtle)", fontSize: "12px",
 const sectionTitleStyle = { margin: 0, color: "var(--app-text-strong)", fontSize: "19px", lineHeight: 1.25 } as const;
 const summaryStyle = { padding: "14px", borderRadius: "12px", background: "var(--app-surface-muted-bg)", border: "1px solid var(--app-surface-border)", color: "var(--app-text-strong)", fontSize: "16px", lineHeight: 1.7, fontWeight: 650 } as const;
 const twoColumnStyle = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: "16px" } as const;
+const deltaGridStyle = { ...twoColumnStyle, alignItems: "start" } as const;
 const chipRowStyle = { display: "flex", gap: "8px", flexWrap: "wrap" as const, alignItems: "center" } as const;
 const chipStyle = { display: "inline-flex", alignItems: "center", padding: "5px 9px", borderRadius: "999px", border: "1px solid var(--app-chip-border)", background: "var(--app-chip-bg)", color: "var(--app-chip-fg)", fontSize: "12px", fontWeight: 700 } as const;
 const coverageGridStyle = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "8px" } as const;
@@ -568,6 +625,10 @@ const developmentSetupStyle = { padding: "12px 14px", borderRadius: "12px", bord
 const developmentUnknownStyle = { padding: "11px 13px", borderRadius: "10px", border: "1px solid var(--app-info-border)", background: "var(--app-info-bg)", color: "var(--app-info-fg)", fontSize: "13px", lineHeight: 1.6 } as const;
 const inlineLinkStyle = { color: "inherit", fontWeight: 800, textDecoration: "underline", justifySelf: "start" } as const;
 const deltaRowStyle = { borderTop: "1px solid var(--app-surface-border)", paddingTop: "7px", color: "var(--app-text-muted)", fontSize: "13px", lineHeight: 1.5 } as const;
+const deltaListStyle = { ...contextBlockStyle, alignSelf: "start" } as const;
+const deltaDetailsStyle = { borderTop: "1px solid var(--app-surface-border)", paddingTop: "8px" } as const;
+const deltaSummaryStyle = { cursor: "pointer", color: "var(--app-text-muted)", fontSize: "12px", fontWeight: 800 } as const;
+const deltaHiddenListStyle = { display: "grid", gap: "7px", marginTop: "8px" } as const;
 const warningTextStyle = { color: "var(--app-warning-fg)", fontSize: "12px", fontWeight: 700 } as const;
 const anchorRowStyle = { display: "flex", gap: "8px", flexWrap: "wrap" as const, alignItems: "center", paddingTop: "8px", borderTop: "1px solid var(--app-surface-border)", color: "var(--app-text-muted)", fontSize: "13px" } as const;
 const boundaryStyle = { padding: "14px 16px", borderRadius: "12px", border: "1px solid var(--app-info-border)", background: "var(--app-info-bg)", color: "var(--app-info-fg)", display: "grid", gap: "5px", fontSize: "13px", lineHeight: 1.6 } as const;

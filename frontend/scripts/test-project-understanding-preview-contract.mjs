@@ -26,7 +26,9 @@ assert.match(
 assert.match(previewSource, /<RequireAdminAuth>/, "Project Understanding must require the existing admin session");
 assert.match(previewSource, /Back to Project Takeaways/, "Project Understanding must provide the primary return path");
 assert.match(previewSource, /Manage Projects/, "Project Understanding must provide the Admin management path");
-assert.match(previewSource, /Cached context only · no automatic repository refresh/, "The page must disclose that it does not refresh automatically");
+assert.match(previewSource, /Cached snapshot · page loads never refresh GitHub/, "The page must disclose that page reads never trigger refresh");
+assert.match(previewSource, /Latest Light Snapshot refresh failed/, "The page must expose a failed scheduled or manual refresh attempt");
+assert.match(previewSource, /Showing the last successful snapshot from/, "A failed refresh must explain that retained context is being shown");
 assert.match(previewSource, /Observation/, "The page must label the repository observation layer");
 assert.match(previewSource, /Deterministic interpretation/, "The page must label deterministic interpretation separately");
 assert.match(previewSource, /Operator-owned project context/, "The page must distinguish operator-owned project context");
@@ -40,7 +42,12 @@ assert.match(previewSource, /Active plan/, "The page must expose the configured 
 assert.match(previewSource, /View source details/, "Dense source excerpts must be collapsed behind an explicit disclosure");
 assert.match(previewSource, /items\.length === 5/, "Default development summaries must be bounded to five items");
 assert.match(previewSource, /cleanDevelopmentItem/, "Default development summaries must remove Markdown syntax deterministically");
+assert.match(previewSource, /markdownTableItems/, "Markdown tables must have a deterministic compact projection");
+assert.match(previewSource, /cells\.slice\(0, 2\)\.join\(" — "\)/, "Table summaries must keep only the primary capability and current-state cells");
 assert.match(previewSource, /min\(100%, 420px\)/, "Development cards must use a responsive two-column-friendly minimum width");
+assert.match(previewSource, /items\.slice\(0, 6\)/, "Repository delta lists must be compact by default");
+assert.match(previewSource, /View \{hiddenItems\.length\} more/, "Additional delta items must remain available behind an explicit disclosure");
+assert.match(previewSource, /deltaGridStyle[\s\S]*alignItems: "start"/, "Short commit lists must not stretch to the height of long file lists");
 assert.match(previewSource, /Commit counts and unchanged deltas do not determine development state\./, "The page must reject commit-based development inference");
 assert.match(previewSource, /Unknown — no configured source reported this state\./, "Missing development facts must remain explicitly unknown");
 assert.match(adminSource, /Development Reality reads excerpt anchors named/, "Admin must explain the source roles that enable Development Reality");
@@ -56,4 +63,4 @@ assert.doesNotMatch(previewSource, /github-context/, "The preview must not creat
 assert.doesNotMatch(previewSource, /method:\s*["']POST["']/, "The preview must remain read-only");
 assert.doesNotMatch(previewSource, /Run Deep Scan/, "The preview must not expose Deep Scan");
 
-console.log("Project Understanding Preview contract tests passed: 31");
+console.log("Project Understanding Preview contract tests passed: 36");

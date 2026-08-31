@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+
+import boto3
+from botocore.config import Config
 
 from app.services.github_project_reader import (
     GitHubRequestError,
@@ -24,6 +28,7 @@ from app.services.project_truth_map_service import resolve_project_truth_map
 BASE_DIR = Path(__file__).resolve().parents[2] / "data"
 PROJECT_REPO_SNAPSHOT_DIR = BASE_DIR / "project_repo_snapshots"
 PROJECT_REPO_SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
+DEFAULT_PROJECT_REPO_SNAPSHOT_S3_PREFIX = "project_repo_snapshots"
 
 
 def _utc_now_iso() -> str:
@@ -37,6 +42,88 @@ def _safe_text(value: Any) -> str:
 def _snapshot_path(project_id: str) -> Path:
     safe_project_id = _safe_text(project_id).replace("/", "_").replace("\\", "_")
     return PROJECT_REPO_SNAPSHOT_DIR / f"{safe_project_id}.json"
+
+
+def _local_output_enabled() -> bool:
+    value = str(os.getenv("AI_RADAR_USE_LOCAL_OUTPUT", "")).strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
+def _shared_storage_enabled() -> bool:
+    value = str(os.getenv("AI_RADAR_PROJECT_SNAPSHOT_S3_ENABLED", "")).strip().lower()
+    return bool(_snapshot_bucket()) and value in {"1", "true", "yes", "on"} and not _local_output_enabled()
+
+
+def _snapshot_bucket() -> str:
+    return str(os.getenv("S3_BUCKET") or os.getenv("AI_RADAR_S3_BUCKET") or "").strip()
+
+
+def _snapshot_s3_prefix() -> str:
+    return (
+        str(os.getenv("PROJECT_REPO_SNAPSHOT_S3_PREFIX") or DEFAULT_PROJECT_REPO_SNAPSHOT_S3_PREFIX)
+        .strip()
+        .strip("/")
+    )
+
+
+def _snapshot_s3_key(project_id: str) -> str:
+    safe_project_id = _safe_text(project_id).replace("/", "_").replace("\\", "_")
+    return f"{_snapshot_s3_prefix()}/{safe_project_id}.json"
+
+
+def _s3_client():
+    if not _snapshot_bucket():
+        return None
+    return boto3.client(
+        "s3",
+        region_name=str(os.getenv("AWS_REGION") or "ap-southeast-2").strip(),
+        config=Config(connect_timeout=2, read_timeout=4, retries={"max_attempts": 2}),
+    )
+
+
+def _read_local_snapshot(project_id: str) -> dict[str, Any] | None:
+    path = _snapshot_path(project_id)
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        return payload if isinstance(payload, dict) else None
+    except Exception:
+        return None
+
+
+def _write_local_snapshot(project_id: str, payload: dict[str, Any]) -> None:
+    path = _snapshot_path(project_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = path.with_suffix(f"{path.suffix}.tmp")
+    temporary_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    temporary_path.replace(path)
+
+
+def _read_shared_snapshot(project_id: str) -> dict[str, Any] | None:
+    client = _s3_client()
+    bucket = _snapshot_bucket()
+    if client is None or not bucket:
+        return None
+    try:
+        response = client.get_object(Bucket=bucket, Key=_snapshot_s3_key(project_id))
+        payload = json.loads(response["Body"].read().decode("utf-8"))
+        return payload if isinstance(payload, dict) else None
+    except Exception:
+        return None
+
+
+def _write_shared_snapshot(project_id: str, payload: dict[str, Any]) -> None:
+    client = _s3_client()
+    bucket = _snapshot_bucket()
+    if client is None or not bucket:
+        raise RuntimeError("Project Snapshot shared storage is enabled but unavailable.")
+    client.put_object(
+        Bucket=bucket,
+        Key=_snapshot_s3_key(project_id),
+        Body=json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8"),
+        ContentType="application/json",
+    )
 
 
 def _truncate(value: Any, limit: int = 900) -> str:
@@ -186,29 +273,77 @@ def _apply_freshness(snapshot: dict[str, Any], *, ttl_hours: int = 168) -> dict[
 
 
 def load_project_repo_snapshot(project_id: str, *, include_freshness: bool = True) -> dict[str, Any] | None:
-    path = _snapshot_path(project_id)
-    if not path.exists():
-        return None
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return None
-    if not isinstance(payload, dict):
+    payload: dict[str, Any] | None = None
+    if _shared_storage_enabled():
+        payload = _read_shared_snapshot(project_id)
+        if payload is not None:
+            try:
+                _write_local_snapshot(project_id, payload)
+            except Exception:
+                pass
+    if payload is None:
+        payload = _read_local_snapshot(project_id)
+    if payload is None:
         return None
     normalized = _normalize_snapshot_status(payload)
     return _apply_freshness(normalized) if include_freshness else normalized
 
 
+def _refresh_state_for_saved_snapshot(
+    snapshot: dict[str, Any],
+    *,
+    existing: dict[str, Any] | None,
+) -> dict[str, Any]:
+    attempted_at = _safe_text(snapshot.get("scanned_at")) or _utc_now_iso()
+    status = _safe_text(snapshot.get("status")).lower() or "failed"
+    existing_refresh = existing.get("refresh") if isinstance((existing or {}).get("refresh"), dict) else {}
+
+    if status == "failed" and existing and _has_snapshot_context(existing):
+        return {
+            **existing,
+            "refresh": {
+                **existing_refresh,
+                "last_attempted_at": attempted_at,
+                "last_attempt_status": "failed",
+                "last_succeeded_at": _safe_text(existing_refresh.get("last_succeeded_at"))
+                or _safe_text(existing.get("scanned_at")),
+                "last_failure": {
+                    "at": attempted_at,
+                    "message": _safe_text(snapshot.get("message")) or "Project Snapshot refresh failed.",
+                },
+            },
+        }
+
+    refresh = {
+        **existing_refresh,
+        "last_attempted_at": attempted_at,
+        "last_attempt_status": status,
+        "last_failure": None,
+    }
+    if status in {"fresh", "partial"}:
+        refresh["last_succeeded_at"] = attempted_at
+    return {**snapshot, "refresh": refresh}
+
+
 def save_project_repo_snapshot(project_id: str, snapshot: dict[str, Any]) -> dict[str, Any]:
+    existing = load_project_repo_snapshot(project_id, include_freshness=False)
+    prepared = _refresh_state_for_saved_snapshot(snapshot, existing=existing)
     payload = {
-        **snapshot,
+        **prepared,
         "schema_version": 2,
         "project_id": project_id,
     }
-    _snapshot_path(project_id).write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    if _shared_storage_enabled():
+        try:
+            _write_shared_snapshot(project_id, payload)
+        except Exception as exc:
+            raise RuntimeError(f"Failed to persist Project Snapshot in shared storage: {type(exc).__name__}") from exc
+        try:
+            _write_local_snapshot(project_id, payload)
+        except Exception:
+            pass
+    else:
+        _write_local_snapshot(project_id, payload)
     return payload
 
 
