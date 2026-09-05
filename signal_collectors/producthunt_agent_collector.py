@@ -40,6 +40,10 @@ PRODUCT_HUNT_AGENT_KEYWORDS = [
 ]
 
 
+class ProductHuntNotConfigured(ValueError):
+    pass
+
+
 def _product_hunt_token() -> str:
     return (
         os.getenv("PRODUCT_HUNT_API_TOKEN")
@@ -92,8 +96,7 @@ def _graphql_query() -> str:
 def _product_hunt_request() -> dict[str, Any]:
     token = _product_hunt_token()
     if not token:
-        print("[producthunt_agent] PRODUCT_HUNT_API_TOKEN not configured; skipping Product Hunt collection")
-        return {}
+        raise ProductHuntNotConfigured("PRODUCT_HUNT_API_TOKEN is not configured")
 
     payload = {
         "query": _graphql_query(),
@@ -206,9 +209,12 @@ def collect_producthunt_agent_signals() -> list[dict[str, Any]]:
             raise InvalidCollectionResponse(
                 "Product Hunt response did not contain a posts edge list"
             )
+    except ProductHuntNotConfigured:
+        print("[producthunt_agent] PRODUCT_HUNT_API_TOKEN is not configured")
+        coverage.fail(0, reason_code="not_configured")
+        return with_collection_coverage([], coverage)
     except error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="ignore")
-        print(f"[producthunt_agent] request failed: {exc.code} {detail}")
+        print(f"[producthunt_agent] request failed with HTTP status {exc.code}")
         coverage.fail(0, reason_code="http_error")
         return with_collection_coverage([], coverage)
     except Exception as exc:

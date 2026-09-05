@@ -217,6 +217,8 @@ def _collector_coverage_counts(coverage: Any) -> dict[str, Any] | None:
         "skipped": len(skipped_set),
         "complete": coverage.get("complete") is True and structurally_complete,
         "reason_codes": reason_codes,
+        "failed_units": [{"unit_id": item["unit_id"], "reason_code": item["reason_code"]} for item in failed],
+        "skipped_units": [{"unit_id": item["unit_id"], "reason_code": item["reason_code"]} for item in skipped],
     }
 
 
@@ -242,6 +244,9 @@ def _build_collection_coverage_summary(
         "failed_step_ids": [],
         "unavailable_step_ids": [],
         "reason_codes": ["coverage_not_recorded"],
+        "failed_units": [],
+        "skipped_units": [],
+        "unit_details_available": False,
     }
     plan = latest_pipeline.get("collector_plan")
     run_id = latest_pipeline.get("run_id")
@@ -282,6 +287,8 @@ def _build_collection_coverage_summary(
         "skipped": 0,
     }
     incomplete_unit_coverage = False
+    failed_units: list[dict[str, str]] = []
+    skipped_units: list[dict[str, str]] = []
 
     for step_id in expected_steps:
         event = events_by_step.get(step_id)
@@ -297,6 +304,8 @@ def _build_collection_coverage_summary(
         for key in totals:
             totals[key] += int(counts[key])
         reason_codes.update(counts["reason_codes"])
+        failed_units.extend({"collector_name": step_id, **item} for item in counts["failed_units"])
+        skipped_units.extend({"collector_name": step_id, **item} for item in counts["skipped_units"])
         if not counts["complete"]:
             incomplete_unit_coverage = True
 
@@ -338,6 +347,9 @@ def _build_collection_coverage_summary(
         "failed_step_ids": failed_step_ids,
         "unavailable_step_ids": unavailable_step_ids,
         "reason_codes": sorted(reason_codes),
+        "failed_units": failed_units,
+        "skipped_units": skipped_units,
+        "unit_details_available": not missing_step_ids and not unavailable_step_ids,
     }
 
 
@@ -945,6 +957,38 @@ def write_monthly_metrics_summary(
     return summary_path
 
 
+def _with_local_coverage_details(payload: dict[str, Any], root: Path, date: str) -> dict[str, Any]:
+    """Attach diagnostics to old local summaries only when the exact run agrees.
+
+    Never rewrite stored summaries, change completeness, or mix local events
+    into an S3 summary. Missing/mismatched records leave details unavailable.
+    """
+    collectors = payload.get("collectors")
+    coverage = collectors.get("coverage") if isinstance(collectors, dict) else None
+    if not isinstance(coverage, dict) or "unit_details_available" in coverage:
+        return payload
+    run_id = coverage.get("run_id")
+    if not isinstance(run_id, str) or not run_id:
+        return payload
+    runs = _as_runs(_read_json(root / "pipeline_runs" / f"{date}.json"))
+    matching = [run for run in runs if run.get("run_id") == run_id]
+    if len(matching) != 1:
+        return payload
+    projected = _build_collection_coverage_summary(
+        matching[0], _read_jsonl(root / "collector_runs" / f"{date}.jsonl")
+    )
+    detail_keys = {"failed_units", "skipped_units", "unit_details_available"}
+    if any(coverage.get(key) != value for key, value in projected.items() if key not in detail_keys):
+        return payload
+    return {
+        **payload,
+        "collectors": {
+            **collectors,
+            "coverage": {**coverage, **{key: projected[key] for key in detail_keys}},
+        },
+    }
+
+
 def load_daily_metrics_summary(
     date: str | None = None,
     *,
@@ -972,7 +1016,7 @@ def load_daily_metrics_summary(
         if isinstance(payload, dict):
             return {
                 "date": str(payload.get("date") or date),
-                "summary": payload,
+                "summary": _with_local_coverage_details(payload, root, date),
                 "path": str(summary_path),
                 "exists": True,
                 "data_source": "local_file",
@@ -1028,7 +1072,7 @@ def load_daily_metrics_summary(
 
     return {
         "date": str(payload.get("date") or latest_path.stem),
-        "summary": payload,
+        "summary": _with_local_coverage_details(payload, root, latest_path.stem),
         "path": str(latest_path),
         "exists": True,
         "data_source": "local_file",

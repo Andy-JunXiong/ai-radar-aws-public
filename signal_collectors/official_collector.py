@@ -4,7 +4,7 @@ import re
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 
 from signal_collectors.collection_coverage import (
     CollectionCoverageTracker,
+    InvalidCollectionResponse,
     failure_reason_code,
     with_collection_coverage,
 )
@@ -217,7 +218,11 @@ def fetch_html(
     on_error=None,
 ) -> Optional[str]:
     try:
-        resp = requests.get(url, headers=HEADERS, timeout=timeout)
+        headers = (
+            {"User-Agent": "AI-Radar/1.0"}
+            if urlparse(url).hostname == "ai.meta.com" else HEADERS
+        )
+        resp = requests.get(url, headers=headers, timeout=timeout)
         resp.raise_for_status()
         return resp.text
     except Exception as e:
@@ -380,16 +385,34 @@ def parse_article_page(
     title = extract_title(soup)
     description = extract_description(soup)
     published_at = extract_published_at(soup)
+    if not published_at and urlparse(url).hostname == "ai.meta.com":
+        # Meta's public article header supplies a date instead of metadata.
+        date_label = soup.select_one("span._amum")
+        if date_label:
+            try:
+                published_at = datetime.strptime(
+                    date_label.get_text(strip=True), "%B %d, %Y"
+                ).replace(tzinfo=timezone.utc).isoformat()
+            except ValueError:
+                pass
     body_text = extract_body_text(soup, max_paragraphs=5)
 
     summary = description or body_text[:280]
     source_excerpt = body_text[:1200] if body_text else ""
     content = source_excerpt if source_excerpt else description
 
+    published_dt = parse_datetime_safe(published_at)
+    if urlparse(url).hostname == "ai.meta.com" and (
+        not title or not summary or not published_dt
+        or published_dt > datetime.now(timezone.utc)
+    ):
+        if on_fetch_error is not None:
+            on_fetch_error(InvalidCollectionResponse("Meta article metadata is incomplete or invalid"))
+        return None
+
     if not title or not summary:
         return None
 
-    published_dt = parse_datetime_safe(published_at)
     if not published_dt:
         # Drop items without a parseable publish time so stale items do not mix in.
         print(f"[official] skip no/invalid published_at: {url}")
@@ -433,6 +456,8 @@ def collect_from_source(
         limit=per_source_limit,
         excluded_prefixes=config.get("excluded_prefixes"),
     )
+    if not article_urls and urlparse(config["list_url"]).hostname == "ai.meta.com":
+        raise InvalidCollectionResponse("Meta index has no recognized article links")
 
     results: List[Dict] = []
     seen_titles = set()

@@ -12,6 +12,7 @@ from signal_collectors.collection_coverage import (
     failure_reason_code,
     with_collection_coverage,
 )
+from signal_collectors.publisher_index import PUBLISHER_INDEXES, collect_publisher_index
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -277,6 +278,19 @@ def collect_rss_signals() -> list[dict]:
             entries = getattr(feed, "entries", [])
 
             status = getattr(feed, "status", None)
+            if status in {404, 410} and feed_url.rstrip("/") in PUBLISHER_INDEXES:
+                publisher_items, publisher_failure = collect_publisher_index(feed_url)
+                fresh_items = [
+                    {**item, "source": source_name, "source_weight": SOURCE_WEIGHTS.get(source_name, 0.5)}
+                    for item in publisher_items if is_recent(item["published_at"])
+                ]
+                all_signals.extend(fresh_items)
+                if publisher_failure:
+                    coverage.fail(source_index, reason_code=publisher_failure)
+                else:
+                    coverage.succeed(source_index, item_count=len(fresh_items))
+                print(f"[rss] same-publisher compatibility read: {len(fresh_items)} fresh items")
+                continue
             if isinstance(status, int) and status >= 400:
                 coverage.fail(source_index, reason_code="http_error")
                 print(f"[rss] source request failed with HTTP status {status}")

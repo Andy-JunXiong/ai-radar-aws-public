@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import SectionCard from "@/components/SectionCard";
+import { collectionCoverage, formatMetricValue } from "./collectionCoverage";
 
 export type CategoryStatus = {
   exists: boolean;
@@ -65,7 +66,7 @@ const TREND_METRICS: TrendMetric[] = [
   { label: "Pipeline Avg Duration", section: "pipeline", field: "avg_duration_seconds", format: "number" },
   { label: "Artifact Writes", section: "artifacts", field: "write_count", format: "number" },
   { label: "Collector Runs", section: "collectors", field: "total_runs", format: "number" },
-  { label: "Collector Success Rate", section: "collectors", field: "success_rate", format: "percent" },
+  { label: "Collector Run Success Rate", section: "collectors", field: "success_rate", format: "percent" },
   { label: "Items Written", section: "collectors", field: "total_items_written", format: "number" },
   { label: "Signals Collected", section: "signals", field: "collected_count", format: "number" },
   { label: "Signals Published", section: "signals", field: "published_count", format: "number" },
@@ -170,7 +171,7 @@ export function MetricsRunState({
   const text = hasRawAhead
     ? `Raw metrics exist through ${status.latestRawEventDate}, but the newest daily summary is ${latestDailyDate || "missing"}. Run the summary refresh command before reading rollups as current.`
     : hasReportingSummary
-      ? `Daily metrics are available for the previous local day from ${dataSourceLabel}.`
+      ? `Daily metrics for ${today} are available from ${dataSourceLabel}.`
       : hasStaleLatest
       ? `The newest daily summary is ${latestDailyDate}. Summary generation has not produced a ${today} reporting-day file yet.`
       : sourceIsProduction
@@ -478,7 +479,8 @@ export function SummarySection({
       {summary ? (
         <div style={summaryLayoutStyle}>
           <SummaryGroup title="Pipeline" rows={summaryRows(summary.pipeline)} />
-          <SummaryGroup title="Collectors" rows={summaryRows(summary.collectors)} />
+          <SummaryGroup title="Collector runs" rows={summaryRows(summary.collectors, ["coverage"])} />
+          {!summary.period_type && <SummaryGroup title="Collector coverage" rows={collectionCoverage(summary.collectors?.coverage).rows} />}
           <SummaryGroup title="Timeline Loads" rows={summaryRows(summary.timeline_loads)} />
           <SummaryGroup title="LLM" rows={summaryRows(summary.llm)} />
           <SummaryGroup title="Verification" rows={summaryRows(summary.verification)} />
@@ -582,6 +584,7 @@ function NarrativeBlock({
 }
 
 function buildAnalysisItems(summary: MetricsSummary, periodLabel: string) {
+  const coverage = collectionCoverage(summary.collectors?.coverage);
   const pipelineSuccess = getBoolean(summary, "pipeline", "success");
   const collectorSuccessRate = getNumber(summary, "collectors", "success_rate");
   const llmSuccessRate = getNumber(summary, "llm", "success_rate");
@@ -593,8 +596,8 @@ function buildAnalysisItems(summary: MetricsSummary, periodLabel: string) {
 
   return [
     {
-      title: "Pipeline",
-      value: pipelineSuccess === true ? "Healthy" : pipelineSuccess === false ? "Failed" : "Unknown",
+      title: "Pipeline execution",
+      value: pipelineSuccess === true ? "Completed" : pipelineSuccess === false ? "Failed" : "Unknown",
       tone: pipelineSuccess === true ? "good" : pipelineSuccess === false ? "bad" : "neutral",
       text:
         pipelineSuccess === true
@@ -604,10 +607,16 @@ function buildAnalysisItems(summary: MetricsSummary, periodLabel: string) {
             : `${periodLabel} pipeline status is not available yet.`,
     },
     {
-      title: "Collection",
+      title: "Collector run success",
       value: formatRate(collectorSuccessRate),
       tone: rateTone(collectorSuccessRate),
-      text: `Collector success rate for ${periodLabel.toLowerCase()}.`,
+      text: `Top-level collector runs for ${periodLabel.toLowerCase()}; source-unit coverage is shown separately.`,
+    },
+    {
+      title: "Collector coverage",
+      value: `${coverage.state} · ${coverage.ratio}`,
+      tone: coverage.tone,
+      text: coverage.description,
     },
     {
       title: "LLM Reliability",
@@ -631,6 +640,7 @@ function buildAnalysisItems(summary: MetricsSummary, periodLabel: string) {
 }
 
 function buildDailyNarrative(summary: MetricsSummary, periodLabel: string) {
+  const coverage = collectionCoverage(summary.collectors?.coverage);
   const pipelineSuccess = getBoolean(summary, "pipeline", "success");
   const collectorSuccessRate = getNumber(summary, "collectors", "success_rate");
   const llmSuccessRate = getNumber(summary, "llm", "success_rate");
@@ -649,6 +659,8 @@ function buildDailyNarrative(summary: MetricsSummary, periodLabel: string) {
         : `${periodLabel} metrics exist, but pipeline completion status is not available.`;
 
   const gaps = [
+    coverage.gap,
+    pipelineSuccess !== true ? "pipeline completion is failed or unknown" : null,
     collectorSuccessRate !== null && collectorSuccessRate < 1
       ? `collector success is ${formatRate(collectorSuccessRate)}`
       : null,
@@ -664,6 +676,7 @@ function buildDailyNarrative(summary: MetricsSummary, periodLabel: string) {
   ].filter(Boolean);
 
   const next = [
+    coverage.gap ? "inspect collector coverage details and resolve missing or failed source units" : null,
     pipelineSuccess === false ? "inspect pipeline failure logs" : null,
     collectorSuccessRate !== null && collectorSuccessRate < 1
       ? "review failed collectors and source availability"
@@ -674,7 +687,7 @@ function buildDailyNarrative(summary: MetricsSummary, periodLabel: string) {
 
   return {
     achieved,
-    missed: gaps.length ? gaps.join("; ") + "." : "No major operational gaps are visible in today's metrics.",
+    missed: gaps.length ? gaps.join("; ") + "." : `No major operational gaps are visible in ${periodLabel.toLowerCase()} metrics.`,
     next: next.length ? next.join("; ") + "." : "Continue monitoring the next run for regressions in collector success, fallback rate, and verification blocks.",
   };
 }
@@ -696,16 +709,16 @@ function buildPeriodAnalysisItems(
 
   return [
     {
-      title: "Coverage",
+      title: "Reporting days",
       value: formatUnitCount(dateCount, "day"),
       tone: "neutral",
       text: `${period} includes ${formatUnitCount(dateCount, "daily summary file")}.`,
     },
     {
-      title: "Collection Health",
+      title: "Collector run success",
       value: formatRate(collectorSuccessRate),
       tone: rateTone(collectorSuccessRate),
-      text: "Collector success across the period.",
+      text: "Top-level run success across the period. Inspect daily summaries for source-unit coverage.",
     },
     {
       title: "LLM Volume",
@@ -781,7 +794,7 @@ function buildPeriodNarrative(
 
   return {
     achieved,
-    missed: gaps.length ? gaps.join("; ") + "." : `No major operational gaps are visible in ${period}.`,
+    missed: [...gaps, "Source-unit completeness is not aggregated here; inspect daily collector coverage."].join("; "),
     next: next.length ? next.join("; ") + "." : `Use the next ${comparisonLabel} comparison to watch for fallback, cost, collector, and verification regressions.`,
   };
 }
@@ -934,9 +947,9 @@ function rateTone(value: number | null | undefined) {
   return "bad";
 }
 
-function summaryRows(payload?: Record<string, unknown>) {
+function summaryRows(payload?: Record<string, unknown>, omit: string[] = []) {
   if (!payload) return [];
-  return Object.entries(payload).map(([key, value]) => ({
+  return Object.entries(payload).filter(([key]) => !omit.includes(key)).map(([key, value]) => ({
     label: humanizeKey(key),
     value: formatUnknown(value),
   }));
@@ -950,10 +963,7 @@ function humanizeKey(value: string) {
 }
 
 function formatUnknown(value: unknown) {
-  if (value === null || value === undefined) return "N/A";
-  if (typeof value === "boolean") return value ? "Yes" : "No";
-  if (Array.isArray(value)) return value.length ? value.join(", ") : "None";
-  return String(value);
+  return formatMetricValue(value);
 }
 
 function MetricCard({
@@ -1208,6 +1218,7 @@ const analysisTextStyle = {
 const summaryLayoutStyle = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+  alignItems: "start",
   gap: "14px",
 } as const;
 
