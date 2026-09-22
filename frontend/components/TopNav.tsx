@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
+import styles from "./TopNav.module.css";
 
 import {
   ADMIN_AUTH_CHANGED_EVENT,
@@ -115,20 +116,8 @@ export default function TopNav() {
         borderBottom: "1px solid var(--app-nav-border)",
       }}
     >
-      <div
-        style={{
-          width: "100%",
-          boxSizing: "border-box",
-          margin: "0 auto",
-          padding: "12px clamp(24px, 4vw, 72px)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          position: "relative",
-          minWidth: 0,
-        }}
-      >
-        <div style={topNavThemeSlotStyle}>
+      <div className={styles.container}>
+        <div className={styles.themeSlot}>
           <div style={themeSegmentStyle} aria-label="Background theme">
             <button
               type="button"
@@ -147,7 +136,7 @@ export default function TopNav() {
           </div>
         </div>
 
-        <div style={topNavMainStyle}>
+        <div className={styles.main}>
           <div
             style={{
               fontSize: "20px",
@@ -206,7 +195,7 @@ export default function TopNav() {
           </nav>
         </div>
 
-        <div style={topNavUtilityStyle}>
+        <div className={styles.utility}>
           <Link href="/architecture" style={architectureLinkStyle}>
             Architecture
           </Link>
@@ -238,34 +227,6 @@ export default function TopNav() {
     </header>
   );
 }
-
-const topNavThemeSlotStyle = {
-  display: "flex",
-  alignItems: "center",
-  position: "absolute",
-  left: "clamp(24px, 4vw, 72px)",
-  top: "50%",
-  transform: "translateY(-50%)",
-} as const;
-
-const topNavMainStyle = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  gap: "16px",
-  minWidth: 0,
-  maxWidth: "100%",
-} as const;
-
-const topNavUtilityStyle = {
-  display: "flex",
-  alignItems: "center",
-  gap: "8px",
-  position: "absolute",
-  right: "clamp(12px, 2vw, 36px)",
-  top: "50%",
-  transform: "translateY(-50%)",
-} as const;
 
 const themeSegmentStyle = {
   display: "inline-flex",

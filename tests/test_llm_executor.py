@@ -1,8 +1,12 @@
+import json
 import sys
+import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
+from zoneinfo import ZoneInfo
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -211,6 +215,56 @@ class LLMExecutorTests(unittest.TestCase):
         self.assertEqual(result.route.model, "claude-opus-4-7")
         self.assertEqual(result.parsed_json, {"ok": True})
         self.assertNotIn("temperature", captured_kwargs[0])
+
+
+class IngestionLLMReportingDateTests(unittest.TestCase):
+    def test_daily_summary_counts_success_and_failure_on_the_pipeline_local_date(self):
+        from backend.app.services import metrics_event_service, metrics_summary_service
+
+        test_root = REPO_ROOT / ".tmp-tests"
+        test_root.mkdir(exist_ok=True)
+        cases = [
+            ("2026-09-21T22:00:00+00:00", "Australia/Sydney", "2026-09-22"),
+            ("2026-10-04T21:00:00+00:00", "Australia/Sydney", "2026-10-05"),
+            ("2026-09-21T22:00:00+00:00", "UTC", "2026-09-21"),
+            ("2026-09-21T02:00:00+00:00", "America/New_York", "2026-09-20"),
+        ]
+        route = llm_executor.ModelRoute("insight", "tier_2_structured", "openai", "mock-model", "test")
+        for timestamp, timezone_name, reporting_date in cases:
+            instant = datetime.fromisoformat(timestamp)
+
+            class FrozenDateTime(datetime):
+                @classmethod
+                def now(cls, tz=None):
+                    return instant.astimezone(tz)
+
+            for success in (True, False):
+                with self.subTest(timezone=timezone_name, timestamp=timestamp, success=success), tempfile.TemporaryDirectory(dir=test_root) as folder:
+                    metrics_dir = Path(folder)
+                    audit_time = instant.isoformat().replace("+00:00", "Z")
+
+                    def record(event):
+                        return metrics_event_service.record_llm_call(event, metrics_dir=metrics_dir)
+
+                    with patch.object(llm_executor, "datetime", FrozenDateTime, create=True), patch.object(
+                        llm_executor, "settings", SimpleNamespace(timezone=ZoneInfo(timezone_name)), create=True
+                    ), patch.object(llm_executor, "record_llm_call", side_effect=record), patch.object(
+                        metrics_event_service, "utc_now_iso", return_value=audit_time
+                    ):
+                        llm_executor._record_llm_metric(
+                            route=route, mode="json", started_at=llm_executor.time.perf_counter(),
+                            success=success, error_type=None if success else "RuntimeError",
+                        )
+
+                    summary = metrics_summary_service.build_daily_metrics_summary(reporting_date, metrics_dir=metrics_dir)
+                    self.assertEqual(summary["llm"]["call_count"], 1)
+                    self.assertEqual(summary["llm"]["success_rate"], 1.0 if success else 0.0)
+                    self.assertEqual(summary["llm"]["error_count"], 0 if success else 1)
+                    files = list((metrics_dir / "llm_calls").glob("*.jsonl"))
+                    self.assertEqual([path.name for path in files], [f"{reporting_date}.jsonl"])
+                    event = json.loads(files[0].read_text(encoding="utf-8"))
+                    self.assertEqual(event["date"], reporting_date)
+                    self.assertEqual(event["created_at"], audit_time)
 
 
 if __name__ == "__main__":

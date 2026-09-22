@@ -2,10 +2,12 @@ import json
 import os
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from openai import OpenAI
 
+from app.config import settings
 from app.intelligence.model_router import (
     PROVIDER_ANTHROPIC,
     PROVIDER_OPENAI,
@@ -73,6 +75,8 @@ def _record_llm_metric(
     try:
         record_llm_call(
             {
+                # Match ingestion's daily summary/upload partition; audit time stays UTC.
+                "date": datetime.now(settings.timezone).date().isoformat(),
                 "task_type": route.task_type,
                 "provider": route.provider,
                 "model": route.model,

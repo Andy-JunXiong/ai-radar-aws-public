@@ -58,7 +58,7 @@ SOURCE_CONFIGS = [
         "category": "AI Model",
         "list_url": "https://openai.com/news/",
         "base_url": "https://openai.com",
-        "allowed_prefixes": ["/news/"],
+        "allowed_prefixes": ["/index/"],
     },
     {
         "source": "anthropic",
@@ -327,6 +327,31 @@ def extract_title(soup: BeautifulSoup) -> str:
     return title
 
 
+def _extract_openai_article_links(html: str, limit: int) -> List[str]:
+    # News categories live under /news/; article cards live under /index/.
+    # Restrict discovery to the news content so global navigation is excluded.
+    main = BeautifulSoup(html, "lxml").find("main")
+    urls: List[str] = []
+    if main is not None and limit > 0:
+        for anchor in main.find_all("a", href=True):
+            parsed = urlparse(urljoin("https://openai.com", anchor["href"].strip()))
+            if (
+                parsed.scheme != "https"
+                or parsed.netloc != "openai.com"
+                or parsed.query or parsed.fragment or parsed.params
+                or not re.fullmatch(r"/index/[^/]+/?", parsed.path)
+            ):
+                continue
+            url = parsed.geturl()
+            if url not in urls:
+                urls.append(url)
+            if len(urls) >= limit:
+                break
+    if not urls:
+        raise InvalidCollectionResponse("OpenAI news index has no recognized article links")
+    return urls
+
+
 def extract_description(soup: BeautifulSoup) -> str:
     description = ""
 
@@ -352,6 +377,29 @@ def extract_published_at(soup: BeautifulSoup) -> str:
     if time_tag:
         return clean_text(time_tag.get("datetime") or time_tag.get_text())
 
+    return ""
+
+
+def _extract_openai_published_at(soup: BeautifulSoup) -> str:
+    # Related-story cards also contain <time>; they are not this article's date.
+    for property_name in ("article:published_time", "og:published_time"):
+        tag = soup.find("meta", attrs={"property": property_name})
+        if tag and tag.get("content"):
+            return clean_text(tag["content"])
+    heading = soup.find("h1")
+    header = heading.find_parent(attrs={"data-section-header": "true"}) if heading else None
+    if header is None:
+        return ""
+    time_tag = header.find("time")
+    if time_tag and time_tag.get("datetime"):
+        return clean_text(time_tag["datetime"])
+    for label in header.find_all("p"):
+        try:
+            return datetime.strptime(clean_text(label.get_text()), "%B %d, %Y").replace(
+                tzinfo=timezone.utc
+            ).isoformat()
+        except ValueError:
+            continue
     return ""
 
 
@@ -384,7 +432,10 @@ def parse_article_page(
 
     title = extract_title(soup)
     description = extract_description(soup)
-    published_at = extract_published_at(soup)
+    published_at = (
+        _extract_openai_published_at(soup)
+        if urlparse(url).hostname == "openai.com" else extract_published_at(soup)
+    )
     if not published_at and urlparse(url).hostname == "ai.meta.com":
         # Meta's public article header supplies a date instead of metadata.
         date_label = soup.select_one("span._amum")
@@ -402,12 +453,12 @@ def parse_article_page(
     content = source_excerpt if source_excerpt else description
 
     published_dt = parse_datetime_safe(published_at)
-    if urlparse(url).hostname == "ai.meta.com" and (
+    if urlparse(url).hostname in {"ai.meta.com", "openai.com"} and (
         not title or not summary or not published_dt
         or published_dt > datetime.now(timezone.utc)
     ):
         if on_fetch_error is not None:
-            on_fetch_error(InvalidCollectionResponse("Meta article metadata is incomplete or invalid"))
+            on_fetch_error(InvalidCollectionResponse("Official article metadata is incomplete or invalid"))
         return None
 
     if not title or not summary:
@@ -449,13 +500,16 @@ def collect_from_source(
     if not list_html:
         return []
 
-    article_urls = extract_links_from_list_page(
-        html=list_html,
-        base_url=config["base_url"],
-        allowed_prefixes=config["allowed_prefixes"],
-        limit=per_source_limit,
-        excluded_prefixes=config.get("excluded_prefixes"),
-    )
+    if config.get("source") == "openai" and config["list_url"] == "https://openai.com/news/":
+        article_urls = _extract_openai_article_links(list_html, per_source_limit)
+    else:
+        article_urls = extract_links_from_list_page(
+            html=list_html,
+            base_url=config["base_url"],
+            allowed_prefixes=config["allowed_prefixes"],
+            limit=per_source_limit,
+            excluded_prefixes=config.get("excluded_prefixes"),
+        )
     if not article_urls and urlparse(config["list_url"]).hostname == "ai.meta.com":
         raise InvalidCollectionResponse("Meta index has no recognized article links")
 
