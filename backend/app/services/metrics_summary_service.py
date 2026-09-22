@@ -6,6 +6,7 @@ from datetime import date as Date
 from pathlib import Path
 from typing import Any
 
+from .json_read_service import load_json_stream
 from .metrics_event_service import METRICS_DIR
 
 
@@ -13,7 +14,8 @@ def _read_json(path: Path) -> Any:
     if not path.exists():
         return None
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        with path.open("rb") as stream:
+            return load_json_stream(stream)
     except json.JSONDecodeError:
         return None
 

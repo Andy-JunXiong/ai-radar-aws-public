@@ -2,7 +2,9 @@ import hashlib
 import json
 import os
 import re
+import tempfile
 import time
+from contextlib import closing
 from datetime import datetime
 from datetime import timezone
 from pathlib import Path
@@ -12,6 +14,7 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 import boto3
 
 from app.config import BASE_DIR
+from app.services.json_read_service import load_json_stream
 from app.services.llm_executor_service import execute_text_json_task
 from app.services.execution_policy_service import PolicyInput
 from app.services.fallback_policy_service import execute_policy_text_json
@@ -25,7 +28,7 @@ from app.services.signal_decision_trace_service import (
 BUCKET_NAME = (
     os.getenv("AI_RADAR_S3_BUCKET")
     or os.getenv("S3_BUCKET")
-    or "ai-radar-junxiong-data"
+    or "your_bucket_name"
 )
 
 s3 = boto3.client("s3")
@@ -100,8 +103,8 @@ INTELLIGENCE_FILE_MAP = {
 
 def read_json(key: str):
     response = s3.get_object(Bucket=BUCKET_NAME, Key=key)
-    content = response["Body"].read().decode("utf-8")
-    return json.loads(content)
+    with closing(response["Body"]) as stream:
+        return load_json_stream(stream)
 
 
 def invalidate_signals_cache() -> None:
@@ -144,16 +147,25 @@ def _local_output_enabled(use_local: bool = False) -> bool:
 
 
 def read_local_json(path: Path):
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+    with open(path, "rb") as stream:
+        return load_json_stream(stream)
 
 
 def write_local_json(path: Path, data: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(data, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    temporary_path = None
+    try:
+        # Serialize in chunks, then publish only a complete snapshot.
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=path.parent,
+            prefix=f".{path.name}.", suffix=".tmp", delete=False,
+        ) as stream:
+            temporary_path = Path(stream.name)
+            json.dump(data, stream, ensure_ascii=False, indent=2)
+        os.replace(temporary_path, path)
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
 
 
 def list_keys(prefix: str, *, suffix: str | None = None) -> List[str]:
