@@ -5,6 +5,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional
 from urllib.parse import urljoin, urlparse
+from xml.etree import ElementTree
 
 import requests
 from bs4 import BeautifulSoup
@@ -56,7 +57,7 @@ SOURCE_CONFIGS = [
         "source_type": "official",
         "author": "OpenAI",
         "category": "AI Model",
-        "list_url": "https://openai.com/news/",
+        "list_url": "https://openai.com/news/rss.xml",
         "base_url": "https://openai.com",
         "allowed_prefixes": ["/index/"],
     },
@@ -220,7 +221,7 @@ def fetch_html(
     try:
         headers = (
             {"User-Agent": "AI-Radar/1.0"}
-            if urlparse(url).hostname == "ai.meta.com" else HEADERS
+            if urlparse(url).hostname in {"ai.meta.com", "openai.com"} else HEADERS
         )
         resp = requests.get(url, headers=headers, timeout=timeout)
         resp.raise_for_status()
@@ -325,6 +326,43 @@ def extract_title(soup: BeautifulSoup) -> str:
             title = clean_text(h1.get_text())
 
     return title
+
+
+def _extract_openai_rss_article_links(xml: str, limit: int) -> List[str]:
+    # The publisher feed is discovery only; metadata/excerpts still come from
+    # the original article. Reject unexpected documents rather than report a
+    # successful empty collection after an upstream format change.
+    if "<!DOCTYPE" in xml.upper() or "<!ENTITY" in xml.upper():
+        raise InvalidCollectionResponse("OpenAI RSS contains unsupported declarations")
+    try:
+        root = ElementTree.fromstring(xml)
+    except ElementTree.ParseError as exc:
+        raise InvalidCollectionResponse("OpenAI RSS is malformed") from exc
+    channel = root.find("channel") if root.tag == "rss" else None
+    if channel is None:
+        raise InvalidCollectionResponse("OpenAI RSS has no channel")
+
+    urls: List[str] = []
+    for item in channel.findall("item"):
+        try:
+            parsed = urlparse((item.findtext("link") or "").strip())
+        except ValueError:
+            continue
+        if (
+            parsed.scheme != "https"
+            or parsed.netloc != "openai.com"
+            or parsed.query or parsed.fragment or parsed.params
+            or not re.fullmatch(r"/index/[A-Za-z0-9_-]+/?", parsed.path)
+        ):
+            continue
+        url = parsed._replace(path=parsed.path.rstrip("/") + "/").geturl()
+        if url not in urls and len(urls) < limit:
+            urls.append(url)
+        if len(urls) >= limit:
+            break
+    if not urls:
+        raise InvalidCollectionResponse("OpenAI RSS has no recognized article links")
+    return urls
 
 
 def _extract_openai_article_links(html: str, limit: int) -> List[str]:
@@ -498,9 +536,17 @@ def collect_from_source(
 ) -> List[Dict]:
     list_html = fetch_html(config["list_url"], on_error=on_fetch_error)
     if not list_html:
+        if (
+            list_html is not None
+            and config.get("source") == "openai"
+            and config["list_url"] == "https://openai.com/news/rss.xml"
+        ):
+            raise InvalidCollectionResponse("OpenAI RSS is empty")
         return []
 
-    if config.get("source") == "openai" and config["list_url"] == "https://openai.com/news/":
+    if config.get("source") == "openai" and config["list_url"] == "https://openai.com/news/rss.xml":
+        article_urls = _extract_openai_rss_article_links(list_html, per_source_limit)
+    elif config.get("source") == "openai" and config["list_url"] == "https://openai.com/news/":
         article_urls = _extract_openai_article_links(list_html, per_source_limit)
     else:
         article_urls = extract_links_from_list_page(

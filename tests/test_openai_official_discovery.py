@@ -11,7 +11,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from signal_collectors import official_collector as collector
 
 
-CONFIG = next(item for item in collector.SOURCE_CONFIGS if item['source'] == 'openai')
+# Keep the existing HTML fixtures on the supported legacy HTML path.
+# The default RSS path and equivalent failure guards are tested separately
+# in test_openai_official_rss.py.
+CONFIG = dict(next(item for item in collector.SOURCE_CONFIGS if item['source'] == 'openai'),
+              list_url='https://openai.com/news/')
 
 
 def article(date=None):

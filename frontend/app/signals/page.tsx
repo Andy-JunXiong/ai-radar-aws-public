@@ -3,7 +3,7 @@
 import AppContainer from "@/components/AppContainer";
 import VerificationGateNote from "@/components/VerificationGateNote";
 import Link from "next/link";
-import { Suspense, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useSearchParams } from "next/navigation";
 import { Activity, Database, FileUp, Pin, PinOff, Radar, Search, SlidersHorizontal, Star, X } from "lucide-react";
 import { API_BASE } from "@/lib/api";
@@ -1537,6 +1537,7 @@ function SignalsPageContent() {
     cacheAgeMs: null,
   });
   const [subscriptionUserId, setSubscriptionUserId] = useState("demo_default");
+  const timelineRequestVersion = useRef(0);
 
   useEffect(() => {
     const storedUserId = getStoredBetaUserId().trim();
@@ -1551,7 +1552,10 @@ function SignalsPageContent() {
   }, [searchParams]);
 
   const loadSignals = useCallback(async (useCache = true, signal?: AbortSignal) => {
+    const requestVersion = ++timelineRequestVersion.current;
+    const isCurrentRequest = () => requestVersion === timelineRequestVersion.current;
     const cached = useCache ? getCachedSignals({ allowStale: true }) : null;
+    setErrorMessage("");
 
     if (cached) {
       const cacheAgeMs = getSignalsCacheAgeMs();
@@ -1565,6 +1569,7 @@ function SignalsPageContent() {
         cacheAgeMs,
       });
       setLoading(false);
+      setRefreshing(false);
 
       if (cacheAgeMs !== null && cacheAgeMs < SIGNALS_CACHE_TTL_MS) {
         return true;
@@ -1572,8 +1577,6 @@ function SignalsPageContent() {
     }
 
     try {
-      setErrorMessage("");
-
       if (!cached) {
         setLoading(true);
         setRefreshing(false);
@@ -1583,7 +1586,10 @@ function SignalsPageContent() {
 
       const requestStartedAt = performance.now();
       const signalsData = await fetchSignalsTimeline(signal, subscriptionUserId);
+      // Superseded requests must neither publish state nor trigger a retry.
+      if (!isCurrentRequest()) return true;
       const requestMs = performance.now() - requestStartedAt;
+      setErrorMessage("");
 
       const rawSignals: SignalItem[] = Array.isArray(signalsData)
         ? signalsData
@@ -1610,6 +1616,7 @@ function SignalsPageContent() {
       });
       return true;
     } catch (err) {
+      if (!isCurrentRequest()) return true;
       if (isAbortError(err)) {
         setErrorMessage(
           cached
@@ -1636,8 +1643,10 @@ function SignalsPageContent() {
       }
       return Boolean(cached);
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (isCurrentRequest()) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, [subscriptionUserId]);
 
@@ -1705,11 +1714,14 @@ function SignalsPageContent() {
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
     let isMounted = true;
 
-    void loadSignals(true, timeout.signal)
+    const initialRequest = loadSignals(true, timeout.signal);
+    const requestVersion = timelineRequestVersion.current;
+    void initialRequest
       .then((hasReadableTimeline) => {
-        if (hasReadableTimeline || !isMounted) return;
+        if (hasReadableTimeline || !isMounted || requestVersion !== timelineRequestVersion.current) return;
 
         retryTimer = setTimeout(() => {
+          if (!isMounted || requestVersion !== timelineRequestVersion.current) return;
           retryTimeout = createTimeoutController(SIGNALS_AUTO_RETRY_TIMEOUT_MS);
           void loadSignals(true, retryTimeout.signal).finally(retryTimeout.clear);
         }, SIGNALS_AUTO_RETRY_DELAY_MS);
@@ -1718,6 +1730,8 @@ function SignalsPageContent() {
 
     return () => {
       isMounted = false;
+      // Invalidate before abort: effect cleanup is not a request timeout.
+      timelineRequestVersion.current += 1;
       if (retryTimer) clearTimeout(retryTimer);
       timeout.abort();
       retryTimeout?.abort();

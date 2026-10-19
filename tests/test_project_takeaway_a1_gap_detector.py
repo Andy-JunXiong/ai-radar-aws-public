@@ -127,6 +127,7 @@ class ProjectTakeawayA1GapDetectorTests(unittest.TestCase):
                     "verification_metadata": {
                         "knowledge_convergence": True,
                         "verification_status": "knowledge_convergence_review_candidate",
+                        "claim_support_summary": {},
                         "allowed_downstream_actions": ["project_takeaway_candidate"],
                         "blocked_downstream_actions": [],
                     },
@@ -227,6 +228,7 @@ class ProjectTakeawayA1GapDetectorTests(unittest.TestCase):
                     "verification_metadata": {
                         "knowledge_convergence": True,
                         "verification_status": "knowledge_convergence_review_candidate",
+                        "claim_support_summary": {},
                         "allowed_downstream_actions": ["project_takeaway_candidate"],
                         "blocked_downstream_actions": [],
                     },
@@ -381,6 +383,7 @@ class ProjectTakeawayA1GapDetectorTests(unittest.TestCase):
                         "manual_override_note": "Human accepted the risk.",
                         "manual_override_expected_outcome": "One scoped follow-up.",
                         "verification_status": "weakly_supported",
+                        "claim_support_summary": {},
                         "blocked_downstream_actions": ["low_risk_action_candidate"],
                     },
                 }
@@ -389,6 +392,54 @@ class ProjectTakeawayA1GapDetectorTests(unittest.TestCase):
         )
 
         self.assertEqual(gaps, [])
+
+    def test_review_context_requires_explicit_claim_support_summary(self):
+        # An empty summary means no support is claimed; omission is incomplete
+        # metadata, even for convergence context or an audited human override.
+        for source in ("knowledge_convergence", "manual_project_takeaway_override"):
+            for summary_case in ("missing", "null", "list", "empty"):
+                with self.subTest(source=source, summary_case=summary_case):
+                    is_override = source == "manual_project_takeaway_override"
+                    verification = {
+                        "verification_status": (
+                            "weakly_supported" if is_override
+                            else "knowledge_convergence_review_candidate"
+                        ),
+                        "blocked_downstream_actions": ["low_risk_action_candidate"],
+                    }
+                    if is_override:
+                        verification.update({
+                            "manual_project_takeaway_override": True,
+                            "manual_override_note": "Human accepted the risk.",
+                            "manual_override_expected_outcome": "One scoped follow-up.",
+                        })
+                    else:
+                        verification["knowledge_convergence"] = True
+                    if summary_case != "missing":
+                        verification["claim_support_summary"] = {
+                            "null": None, "list": [], "empty": {},
+                        }[summary_case]
+
+                    gaps = analyze_project_takeaway_items(
+                        [{
+                            "signal_id": "sig-context-contract",
+                            "status": "action" if is_override else "candidate",
+                            "candidate_source": source,
+                            "verification_metadata": verification,
+                        }],
+                        project_id="ai_radar",
+                    )
+
+                    if summary_case == "empty":
+                        self.assertEqual(gaps, [])
+                    else:
+                        self.assertEqual(
+                            {gap.code for gap in gaps}, {"missing_verification_context"},
+                        )
+                        self.assertEqual(
+                            {gap.data_bucket for gap in gaps}, {"needs_classification"},
+                        )
+                        self.assertEqual({gap.severity for gap in gaps}, {"error"})
 
     def test_action_completed_must_not_be_review_outcome(self):
         gaps = analyze_project_takeaway_items(

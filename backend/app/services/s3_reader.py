@@ -4,10 +4,14 @@ import os
 import re
 import tempfile
 import time
+from collections import deque
 from contextlib import closing
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from datetime import timezone
+from itertools import islice
 from pathlib import Path
+from threading import RLock
 from typing import Any, Dict, List, Optional
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
@@ -74,6 +78,8 @@ MANUAL_SESSIONS_CACHE: Dict[str, Any] = {
 }
 
 SIGNALS_CACHE_TTL = 60 * 60  # 1 hour
+SIGNALS_HISTORY_READ_WORKERS = 4
+SIGNALS_LOAD_LOCK = RLock()
 JSON_CACHE_TTL = 300
 LOCAL_SIGNALS_SNAPSHOT_TTL = 6 * 60 * 60
 
@@ -108,9 +114,10 @@ def read_json(key: str):
 
 
 def invalidate_signals_cache() -> None:
-    SIGNALS_CACHE["data"] = None
-    SIGNALS_CACHE["by_id"] = {}
-    SIGNALS_CACHE["last_loaded"] = 0
+    with SIGNALS_LOAD_LOCK:
+        SIGNALS_CACHE["data"] = None
+        SIGNALS_CACHE["by_id"] = {}
+        SIGNALS_CACHE["last_loaded"] = 0
 
 
 def _invalidate_simple_cache(cache: Dict[str, Any]) -> None:
@@ -688,15 +695,29 @@ def _load_signals_from_s3():
         history_keys = sorted(history_keys, reverse=True)
         print(f"[DEBUG] history keys used = {history_keys}")
 
-        for key in history_keys:
-            try:
-                history_data = read_json(key)
-                history_items = normalize_items(history_data)
-                print(f"[DEBUG] loaded {len(history_items)} from {key}")
-                all_items.extend(history_items)
-                loaded_any_s3_payload = True
-            except Exception as inner_e:
-                print(f"[DEBUG] failed reading {key}: {inner_e}")
+        # Bound both active reads and completed payloads waiting to be merged.
+        # Consume in the original key order: duplicate resolution is ordered.
+        with ThreadPoolExecutor(max_workers=SIGNALS_HISTORY_READ_WORKERS) as pool:
+            remaining_keys = iter(history_keys)
+            pending = deque(
+                (key, pool.submit(read_json, key))
+                for key in islice(remaining_keys, SIGNALS_HISTORY_READ_WORKERS)
+            )
+            while pending:
+                key, future = pending.popleft()
+                try:
+                    history_items = normalize_items(future.result())
+                    print(f"[DEBUG] loaded {len(history_items)} from {key}")
+                    all_items.extend(history_items)
+                    loaded_any_s3_payload = True
+                except Exception as inner_e:
+                    print(f"[DEBUG] failed reading {key}: {inner_e}")
+                finally:
+                    del future
+                # Refill only the consumed slot; never queue the entire history.
+                next_key = next(remaining_keys, None)
+                if next_key is not None:
+                    pending.append((next_key, pool.submit(read_json, next_key)))
     except Exception as e:
         print(f"[DEBUG] history listing failed: {e}")
 
@@ -711,12 +732,13 @@ def _load_signals_from_s3():
     all_items = sort_by_collected_at_desc(all_items)
     all_items = assign_stable_ids(all_items)
 
-    print(f"===== LOADED {len(all_items)} SIGNALS FROM S3 =====")
     try:
         write_local_json(LOCAL_SIGNALS_FILE, {"signals": all_items})
         print(f"[DEBUG] wrote local signals snapshot to {LOCAL_SIGNALS_FILE}")
     except Exception as e:
         print(f"[DEBUG] failed writing local signals snapshot: {e}")
+    # Completion timing must include the synchronous snapshot attempt.
+    print(f"===== LOADED {len(all_items)} SIGNALS FROM S3 =====")
     return all_items
 
 
@@ -862,6 +884,13 @@ def _update_signal_documents(
 
 
 def load_signals(force_refresh: bool = False, use_local: bool = False):
+    # Recheck the cache after acquiring the lock so concurrent cold requests
+    # reuse the completed load instead of multiplying its memory and I/O.
+    with SIGNALS_LOAD_LOCK:
+        return _load_signals_locked(force_refresh=force_refresh, use_local=use_local)
+
+
+def _load_signals_locked(force_refresh: bool = False, use_local: bool = False):
     global SIGNALS_CACHE
     started_at = time.time()
     use_local = _local_output_enabled(use_local)
