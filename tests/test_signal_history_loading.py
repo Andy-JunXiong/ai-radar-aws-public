@@ -138,7 +138,7 @@ def test_history_merge_matches_serial_order_even_when_later_reads_finish_first()
     ), patch.object(s3_reader, "write_local_json") as write:
         actual = s3_reader._load_signals_from_s3()
     assert actual == expected
-    write.assert_called_once_with(s3_reader.LOCAL_SIGNALS_FILE, {"signals": expected})
+    write.assert_called_once_with(s3_reader.LOCAL_SIGNALS_FILE, {"signals": expected}, compact=True)
     shared = next(item for item in actual if item["title"] == "shared")
     assert shared["verification_metadata"]["blocked_downstream_actions"] == ["low_risk_action_candidate"]
     assert shared["saved_reason"] == "older"
@@ -164,7 +164,8 @@ def test_failed_history_read_keeps_successful_siblings_and_remaining_batches():
 def test_load_completion_marker_includes_the_snapshot_attempt(snapshot_fails):
     events = []
 
-    def write(*args):
+    def write(*args, compact=False):
+        assert compact is True
         events.append("snapshot_attempt")
         if snapshot_fails:
             raise OSError("synthetic snapshot failure")
@@ -252,7 +253,7 @@ def test_history_unavailable_does_not_fabricate_a_successful_empty_snapshot(empt
         actual = s3_reader._load_signals_from_s3()
     if empty_success:
         assert actual == []
-        write.assert_called_once_with(s3_reader.LOCAL_SIGNALS_FILE, {"signals": []})
+        write.assert_called_once_with(s3_reader.LOCAL_SIGNALS_FILE, {"signals": []}, compact=True)
     else:
         assert actual is None
         write.assert_not_called()

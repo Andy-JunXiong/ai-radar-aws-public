@@ -112,7 +112,7 @@ def main():
         stack.enter_context(patch.object(s3_reader, "read_json", side_effect=read))
         stack.enter_context(patch.object(s3_reader, "list_json_keys", return_value=keys))
         # A plain no-op avoids mock call history retaining completed payloads.
-        stack.enter_context(patch.object(s3_reader, "write_local_json", lambda *a: None))
+        stack.enter_context(patch.object(s3_reader, "write_local_json", lambda *a, **kw: None))
         rows = []
         for label, loader in [("serial", serial_load), ("batched", batched_load),
                               ("rolling", s3_reader._load_signals_from_s3)]:

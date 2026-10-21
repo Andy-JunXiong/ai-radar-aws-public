@@ -5,7 +5,7 @@ import re
 import tempfile
 import time
 from collections import deque
-from contextlib import closing
+from contextlib import closing, contextmanager
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from datetime import timezone
@@ -158,7 +158,7 @@ def read_local_json(path: Path):
         return load_json_stream(stream)
 
 
-def write_local_json(path: Path, data: Any) -> None:
+def write_local_json(path: Path, data: Any, *, compact: bool = False) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary_path = None
     try:
@@ -168,7 +168,11 @@ def write_local_json(path: Path, data: Any) -> None:
             prefix=f".{path.name}.", suffix=".tmp", delete=False,
         ) as stream:
             temporary_path = Path(stream.name)
-            json.dump(data, stream, ensure_ascii=False, indent=2)
+            json.dump(
+                data, stream, ensure_ascii=False,
+                indent=None if compact else 2,
+                separators=(",", ":") if compact else None,
+            )
         os.replace(temporary_path, path)
     finally:
         if temporary_path is not None:
@@ -670,6 +674,23 @@ def _load_signals_from_local(*, max_age_seconds: int | None = None):
         return None
 
 
+@contextmanager
+def _signal_load_phase(phase: str):
+    started_at = time.perf_counter()
+    result = {"status": "success"}
+    try:
+        yield result
+    except BaseException:
+        result["status"] = "error"
+        raise
+    finally:
+        elapsed = time.perf_counter() - started_at
+        print(
+            f"[TIMING] signals_load phase={phase} "
+            f"elapsed_s={elapsed:.6f} status={result['status']}"
+        )
+
+
 def _load_signals_from_s3():
     print("===== LOAD SIGNALS FROM S3 =====")
 
@@ -677,47 +698,51 @@ def _load_signals_from_s3():
     loaded_any_s3_payload = False
 
     try:
-        latest_data = read_json("signals/latest/signals.json")
-        latest_items = normalize_items(latest_data)
-        print(f"[DEBUG] latest count = {len(latest_items)}")
-        all_items.extend(latest_items)
-        loaded_any_s3_payload = True
+        with _signal_load_phase("latest_read_normalize_merge"):
+            latest_data = read_json("signals/latest/signals.json")
+            latest_items = normalize_items(latest_data)
+            print(f"[DEBUG] latest count = {len(latest_items)}")
+            all_items.extend(latest_items)
+            loaded_any_s3_payload = True
     except Exception as e:
         print(f"[DEBUG] latest load failed: {e}")
 
     try:
-        all_signal_keys = list_json_keys("signals/")
-        history_keys = [
-            key
-            for key in all_signal_keys
-            if _is_main_signal_history_key(key)
-        ]
-        history_keys = sorted(history_keys, reverse=True)
-        print(f"[DEBUG] history keys used = {history_keys}")
+        with _signal_load_phase("history_list_filter_sort"):
+            all_signal_keys = list_json_keys("signals/")
+            history_keys = [
+                key
+                for key in all_signal_keys
+                if _is_main_signal_history_key(key)
+            ]
+            history_keys = sorted(history_keys, reverse=True)
+            print(f"[DEBUG] history keys used = {history_keys}")
 
         # Bound both active reads and completed payloads waiting to be merged.
         # Consume in the original key order: duplicate resolution is ordered.
-        with ThreadPoolExecutor(max_workers=SIGNALS_HISTORY_READ_WORKERS) as pool:
-            remaining_keys = iter(history_keys)
-            pending = deque(
-                (key, pool.submit(read_json, key))
-                for key in islice(remaining_keys, SIGNALS_HISTORY_READ_WORKERS)
-            )
-            while pending:
-                key, future = pending.popleft()
-                try:
-                    history_items = normalize_items(future.result())
-                    print(f"[DEBUG] loaded {len(history_items)} from {key}")
-                    all_items.extend(history_items)
-                    loaded_any_s3_payload = True
-                except Exception as inner_e:
-                    print(f"[DEBUG] failed reading {key}: {inner_e}")
-                finally:
-                    del future
-                # Refill only the consumed slot; never queue the entire history.
-                next_key = next(remaining_keys, None)
-                if next_key is not None:
-                    pending.append((next_key, pool.submit(read_json, next_key)))
+        with _signal_load_phase("history_read_normalize_merge") as history_phase:
+            with ThreadPoolExecutor(max_workers=SIGNALS_HISTORY_READ_WORKERS) as pool:
+                remaining_keys = iter(history_keys)
+                pending = deque(
+                    (key, pool.submit(read_json, key))
+                    for key in islice(remaining_keys, SIGNALS_HISTORY_READ_WORKERS)
+                )
+                while pending:
+                    key, future = pending.popleft()
+                    try:
+                        history_items = normalize_items(future.result())
+                        print(f"[DEBUG] loaded {len(history_items)} from {key}")
+                        all_items.extend(history_items)
+                        loaded_any_s3_payload = True
+                    except Exception as inner_e:
+                        history_phase["status"] = "error"
+                        print(f"[DEBUG] failed reading {key}: {inner_e}")
+                    finally:
+                        del future
+                    # Refill only the consumed slot; never queue the entire history.
+                    next_key = next(remaining_keys, None)
+                    if next_key is not None:
+                        pending.append((next_key, pool.submit(read_json, next_key)))
     except Exception as e:
         print(f"[DEBUG] history listing failed: {e}")
 
@@ -726,14 +751,18 @@ def _load_signals_from_s3():
         return None
 
     print(f"[DEBUG] before dedupe total = {len(all_items)}")
-    all_items = dedupe_signals(all_items)
+    with _signal_load_phase("dedupe"):
+        all_items = dedupe_signals(all_items)
     print(f"[DEBUG] after dedupe total = {len(all_items)}")
 
-    all_items = sort_by_collected_at_desc(all_items)
-    all_items = assign_stable_ids(all_items)
+    with _signal_load_phase("sort"):
+        all_items = sort_by_collected_at_desc(all_items)
+    with _signal_load_phase("stable_ids"):
+        all_items = assign_stable_ids(all_items)
 
     try:
-        write_local_json(LOCAL_SIGNALS_FILE, {"signals": all_items})
+        with _signal_load_phase("snapshot_write"):
+            write_local_json(LOCAL_SIGNALS_FILE, {"signals": all_items}, compact=True)
         print(f"[DEBUG] wrote local signals snapshot to {LOCAL_SIGNALS_FILE}")
     except Exception as e:
         print(f"[DEBUG] failed writing local signals snapshot: {e}")
@@ -772,7 +801,7 @@ def _update_cached_signal_snapshot(signal_id: str, update_fn) -> bool:
     SIGNALS_CACHE["last_loaded"] = time.time()
 
     try:
-        write_local_json(LOCAL_SIGNALS_FILE, {"signals": items})
+        write_local_json(LOCAL_SIGNALS_FILE, {"signals": items}, compact=True)
         print(f"[DEBUG] patched local signals snapshot for {signal_id}")
     except Exception as e:
         print(f"[DEBUG] failed writing patched local signals snapshot: {e}")
