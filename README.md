@@ -70,6 +70,12 @@ flowchart LR
 
 Signals are normalised, interpreted, synthesised across time, and mapped to active projects. The product is designed to explain **why a development matters** and **what confidence is justified**, not only what was published.
 
+Automatic daily Insight generation selects only qualifying signals; it does
+not fill a minimum output quota. Ingestion can reuse successful unchanged
+Insight, Repo and Friction analyses across runs while retaining their original
+analysis timestamps. Material input, context, prompt or model changes trigger
+fresh analysis; invalid or failed results are not reused.
+
 ### Evidence-bounded AI
 
 AI Radar does not claim to automatically prove external information true. It classifies evidential status and uses that status to control downstream eligibility.

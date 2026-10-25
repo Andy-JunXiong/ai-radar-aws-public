@@ -8,6 +8,7 @@ from pathlib import Path
 from app.exporters.topic_intelligence_exporter import export_topic_intelligence
 from app.exporters.topic_momentum_exporter import export_topic_momentum
 from app.exporters.topic_graph_exporter import export_topic_graph
+from app.intelligence.analysis_reuse import AnalysisReuse, analysis_fingerprint
 from app.exporters.research_map_exporter import export_research_map
 from dotenv import load_dotenv
 
@@ -120,7 +121,7 @@ CURRENT_COLLECTOR_ATTEMPTS: list[str] = []
 TRUE_ENV_VALUES = {"1", "true", "yes", "on"}
 
 S3_BUCKET_NAME = os.getenv("AI_RADAR_S3_BUCKET") or os.getenv(
-    "S3_BUCKET", "ai-radar-junxiong-data"
+    "S3_BUCKET", "example-data-bucket"
 )
 s3_client = boto3.client("s3")
 DEFAULT_SUBSCRIPTION_SCOPE = (
@@ -822,7 +823,31 @@ def build_agent_watch_repo_snapshots(signals_data: list[dict], generated_at: str
     }
 
 
-def build_agent_watch_repo_profiles(signals_data: list[dict], generated_at: str) -> dict:
+def _profile_reuse_fingerprint(
+    *, kind: str, system_prompt: str, user_prompt: str, policy: dict,
+    generated_at: str, published_at: str, max_tokens: int,
+) -> str:
+    route = route_task(policy["effective_task_type"])
+    context = {"temperature": 0.2, "max_tokens": max_tokens, "json_mode": True}
+    if kind == "repo":
+        # Keep date-sensitive provenance checks, but do not regenerate the same
+        # repo interpretation solely because today's date changed.
+        system_prompt = system_prompt.replace(generated_at[:10], "<analysis-date>")
+        try:
+            publication_day = datetime.fromisoformat(published_at.replace("Z", "+00:00")).date()
+            context["future_publication"] = publication_day > datetime.fromisoformat(generated_at).date()
+        except (ValueError, TypeError, AttributeError):
+            context["future_publication"] = "unknown"
+    return analysis_fingerprint(
+        kind=kind, provider=route.provider, model=route.model,
+        messages=[_apply_pipeline_policy_prompt(system_prompt, policy=policy), user_prompt],
+        context=context,
+    )
+
+
+def build_agent_watch_repo_profiles(
+    signals_data: list[dict], generated_at: str, *, reuse: AnalysisReuse | None = None,
+) -> dict:
     agent_signals = _load_agent_watch_tracking_candidates(signals_data)
 
     try:
@@ -901,6 +926,8 @@ def build_agent_watch_repo_profiles(signals_data: list[dict], generated_at: str)
         provider_used = None
         model_used = None
         policy_metadata = None
+        analysis_reused = False
+        analysis_generated_at = generated_at
 
         try:
             system_prompt, user_prompt = agent_repo_profile_prompts(
@@ -912,37 +939,57 @@ def build_agent_watch_repo_profiles(signals_data: list[dict], generated_at: str)
                 importance_score=item.get("agent_watch_score"),
                 requires_traceability=True,
             )
-            result = execute_routed_task(
-                task_type=policy["effective_task_type"],
-                temperature=0.2,
-                json_mode=True,
-                max_tokens=1200,
-                messages=[
-                    {"role": "system", "content": _apply_pipeline_policy_prompt(system_prompt, policy=policy)},
-                    {"role": "user", "content": user_prompt},
-                ],
+            reuse_key = _profile_reuse_fingerprint(
+                kind="repo", system_prompt=system_prompt, user_prompt=user_prompt,
+                policy=policy, generated_at=generated_at,
+                published_at=str(item.get("published_at") or ""), max_tokens=1200,
             )
-            parsed = result.parsed_json or {}
-            normalized_profile = {
-                "repo_summary": _clean_text(str(parsed.get("repo_summary") or "")),
-                "what_it_does": _clean_text(str(parsed.get("what_it_does") or "")),
-                "why_it_matters": _clean_text(str(parsed.get("why_it_matters") or "")),
-                "project_fit": _clean_text(str(parsed.get("project_fit") or "")),
-                "suggested_use_cases": [
-                    _clean_text(str(value))
-                    for value in (parsed.get("suggested_use_cases") or [])
-                    if _clean_text(str(value))
-                ],
-                "risks": [
-                    _clean_text(str(value))
-                    for value in (parsed.get("risks") or [])
-                    if _clean_text(str(value))
-                ],
-                "confidence": _clean_text(str(parsed.get("confidence") or "")) or "medium",
-            }
-            provider_used = result.route.provider
-            model_used = result.route.model
-            policy_metadata = policy
+            cached = reuse.lookup(reuse_key, "repo") if reuse is not None else None
+            if cached:
+                normalized_profile = cached["result"]
+                provider_used = normalized_profile.pop("provider_used")
+                model_used = normalized_profile.pop("model_used")
+                policy_metadata = policy
+                analysis_reused = True
+                analysis_generated_at = cached["generated_at"]
+            else:
+                result = execute_routed_task(
+                    task_type=policy["effective_task_type"],
+                    temperature=0.2,
+                    json_mode=True,
+                    max_tokens=1200,
+                    messages=[
+                        {"role": "system", "content": _apply_pipeline_policy_prompt(system_prompt, policy=policy)},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                )
+                parsed = result.parsed_json or {}
+                normalized_profile = {
+                    "repo_summary": _clean_text(str(parsed.get("repo_summary") or "")),
+                    "what_it_does": _clean_text(str(parsed.get("what_it_does") or "")),
+                    "why_it_matters": _clean_text(str(parsed.get("why_it_matters") or "")),
+                    "project_fit": _clean_text(str(parsed.get("project_fit") or "")),
+                    "suggested_use_cases": [
+                        _clean_text(str(value))
+                        for value in (parsed.get("suggested_use_cases") or [])
+                        if _clean_text(str(value))
+                    ],
+                    "risks": [
+                        _clean_text(str(value))
+                        for value in (parsed.get("risks") or [])
+                        if _clean_text(str(value))
+                    ],
+                    "confidence": _clean_text(str(parsed.get("confidence") or "")) or "medium",
+                }
+                provider_used = result.route.provider
+                model_used = result.route.model
+                policy_metadata = policy
+                if reuse is not None:
+                    reuse.remember(
+                        reuse_key, "repo",
+                        {**normalized_profile, "provider_used": provider_used, "model_used": model_used},
+                        generated_at,
+                    )
         except Exception as e:
             print(f"[WARN] Agent watch repo profile failed for '{item.get('title', '')[:80]}': {e}")
 
@@ -952,7 +999,9 @@ def build_agent_watch_repo_profiles(signals_data: list[dict], generated_at: str)
         profiled_items.append(
             {
                 "entity_id": entity_id,
-                "generated_at": generated_at,
+                "generated_at": analysis_generated_at,
+                "last_observed_at": generated_at,
+                "analysis_reused": analysis_reused,
                 "title": item.get("title", ""),
                 "canonical_url": canonical_url,
                 "source": item.get("source", ""),
@@ -1050,7 +1099,9 @@ def _load_friction_profile_candidates(signals_data: list[dict]) -> list[dict]:
     return []
 
 
-def build_friction_signal_profiles(signals_data: list[dict], generated_at: str) -> dict:
+def build_friction_signal_profiles(
+    signals_data: list[dict], generated_at: str, *, reuse: AnalysisReuse | None = None,
+) -> dict:
     friction_signals = _load_friction_profile_candidates(signals_data)
 
     try:
@@ -1118,6 +1169,8 @@ def build_friction_signal_profiles(signals_data: list[dict], generated_at: str) 
         provider_used = None
         model_used = None
         policy_metadata = None
+        analysis_reused = False
+        analysis_generated_at = generated_at
 
         try:
             system_prompt, user_prompt = friction_signal_profile_prompts(
@@ -1128,32 +1181,52 @@ def build_friction_signal_profiles(signals_data: list[dict], generated_at: str) 
                 importance_score=item.get("friction_score"),
                 requires_traceability=True,
             )
-            result = execute_routed_task(
-                task_type=policy["effective_task_type"],
-                temperature=0.2,
-                json_mode=True,
-                max_tokens=1100,
-                messages=[
-                    {"role": "system", "content": _apply_pipeline_policy_prompt(system_prompt, policy=policy)},
-                    {"role": "user", "content": user_prompt},
-                ],
+            reuse_key = _profile_reuse_fingerprint(
+                kind="friction", system_prompt=system_prompt, user_prompt=user_prompt,
+                policy=policy, generated_at=generated_at,
+                published_at=str(item.get("published_at") or ""), max_tokens=1100,
             )
-            parsed = result.parsed_json or {}
-            normalized_profile = {
-                "problem_summary": _clean_text(str(parsed.get("problem_summary") or "")),
-                "why_this_matters": _clean_text(str(parsed.get("why_this_matters") or "")),
-                "who_is_affected": _clean_text(str(parsed.get("who_is_affected") or "")),
-                "product_opportunity": _clean_text(str(parsed.get("product_opportunity") or "")),
-                "suggested_response": [
-                    _clean_text(str(value))
-                    for value in (parsed.get("suggested_response") or [])
-                    if _clean_text(str(value))
-                ],
-                "confidence": _clean_text(str(parsed.get("confidence") or "")) or "medium",
-            }
-            provider_used = result.route.provider
-            model_used = result.route.model
-            policy_metadata = policy
+            cached = reuse.lookup(reuse_key, "friction") if reuse is not None else None
+            if cached:
+                normalized_profile = cached["result"]
+                provider_used = normalized_profile.pop("provider_used")
+                model_used = normalized_profile.pop("model_used")
+                policy_metadata = policy
+                analysis_reused = True
+                analysis_generated_at = cached["generated_at"]
+            else:
+                result = execute_routed_task(
+                    task_type=policy["effective_task_type"],
+                    temperature=0.2,
+                    json_mode=True,
+                    max_tokens=1100,
+                    messages=[
+                        {"role": "system", "content": _apply_pipeline_policy_prompt(system_prompt, policy=policy)},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                )
+                parsed = result.parsed_json or {}
+                normalized_profile = {
+                    "problem_summary": _clean_text(str(parsed.get("problem_summary") or "")),
+                    "why_this_matters": _clean_text(str(parsed.get("why_this_matters") or "")),
+                    "who_is_affected": _clean_text(str(parsed.get("who_is_affected") or "")),
+                    "product_opportunity": _clean_text(str(parsed.get("product_opportunity") or "")),
+                    "suggested_response": [
+                        _clean_text(str(value))
+                        for value in (parsed.get("suggested_response") or [])
+                        if _clean_text(str(value))
+                    ],
+                    "confidence": _clean_text(str(parsed.get("confidence") or "")) or "medium",
+                }
+                provider_used = result.route.provider
+                model_used = result.route.model
+                policy_metadata = policy
+                if reuse is not None:
+                    reuse.remember(
+                        reuse_key, "friction",
+                        {**normalized_profile, "provider_used": provider_used, "model_used": model_used},
+                        generated_at,
+                    )
         except Exception as e:
             print(f"[WARN] Friction signal profile failed for '{item.get('title', '')[:80]}': {e}")
 
@@ -1163,7 +1236,9 @@ def build_friction_signal_profiles(signals_data: list[dict], generated_at: str) 
         profiled_items.append(
             {
                 "entity_id": entity_key,
-                "generated_at": generated_at,
+                "generated_at": analysis_generated_at,
+                "last_observed_at": generated_at,
+                "analysis_reused": analysis_reused,
                 "title": item.get("title", ""),
                 "url": item.get("url", ""),
                 "source": item.get("source", ""),
@@ -1729,21 +1804,8 @@ def select_signals_for_insight(
     MAX_AUTO_INSIGHTS = 12
     selected = auto_insight_signals[:MAX_AUTO_INSIGHTS]
 
-    MIN_AUTO_INSIGHTS = 6
-    if len(selected) < MIN_AUTO_INSIGHTS:
-        needed = MIN_AUTO_INSIGHTS - len(selected)
-        for s in manual_candidate_signals[:needed]:
-            if not getattr(s, "insight_status", None):
-                setattr(s, "insight_status", "manual_candidate")
-                setattr(s, "insight_status_label", "Insight available on demand")
-            selected.append(s)
-
-    if not selected:
-        selected = sorted_signals[:5]
-        for s in selected:
-            if not getattr(s, "insight_status", None):
-                setattr(s, "insight_status", "auto_generated")
-                setattr(s, "insight_status_label", "Insight auto-generated")
+    # Candidate/archived signals remain available without paid quota filling.
+    # An empty automatic selection is a valid daily result.
 
     print("=== Insight Input Distribution ===")
     print(f"total signals: {len(signals)}")
@@ -1793,7 +1855,9 @@ def _build_fallback_insight(signal: Signal) -> dict:
     }
 
 
-def generate_insight(signal: Signal, personal_context: dict) -> Insight:
+def generate_insight(
+    signal: Signal, personal_context: dict, *, reuse: AnalysisReuse | None = None,
+) -> Insight:
     signal_dict = signal.to_dict()
     signal_dict["quality_level"] = getattr(signal, "quality_level", "unknown")
     signal_dict["source_weight"] = getattr(signal, "source_weight", 0.5)
@@ -1815,12 +1879,33 @@ def generate_insight(signal: Signal, personal_context: dict) -> Insight:
         policy=insight_policy,
     )
 
+    insight_route = route_task(insight_policy["effective_task_type"])
+    # Age/ranking/collection bookkeeping is refreshed daily without changing
+    # the underlying observation or personal context being interpreted.
+    stable_signal = {k: v for k, v in signal_dict.items() if k not in {
+        "collected_at", "recency_score", "novelty_score", "score",
+    }}
+    stable_system, stable_user = personalized_radar_insight_prompts(
+        personal_context=personal_context, signal_payload=stable_signal, policy=insight_policy,
+    )
+    reuse_key = analysis_fingerprint(
+        kind="insight", provider=insight_route.provider, model=insight_route.model,
+        messages=[_apply_pipeline_policy_prompt(stable_system, policy=insight_policy), stable_user],
+        context={"temperature": 0.7, "json_mode": True},
+    )
+    cached = reuse.lookup(reuse_key, "insight") if reuse is not None else None
+    if cached:
+        payload = cached["result"]
+        payload["execution"] = {
+            **payload["execution"], "analysis_reused": True,
+            "analysis_generated_at": cached["generated_at"],
+        }
+        return Insight(**payload)
+
     parsed = None
     last_error = None
     provider_used = None
     model_used = None
-
-    insight_route = route_task(insight_policy["effective_task_type"])
 
     insight_attempts_raw = str(os.getenv("PIPELINE_INSIGHT_MAX_ATTEMPTS", "1")).strip()
     try:
@@ -1872,11 +1957,13 @@ def generate_insight(signal: Signal, personal_context: dict) -> Insight:
             last_error = e
             print(f"[WARN] Insight generation failed on attempt {attempt + 1} for '{signal.title}': {e}")
 
-    if not parsed or not _has_meaningful_insight(parsed):
+    fallback_used = not parsed or not _has_meaningful_insight(parsed)
+    if fallback_used:
         print(f"[WARN] Using fallback insight for: {signal.title}")
         parsed = _build_fallback_insight(signal)
 
-    return Insight(
+    analyzed_at = datetime.now(timezone.utc).isoformat()
+    insight = Insight(
         signal_title=signal.title,
         signal_summary=signal.summary,
         why_it_matters=parsed.get("why_it_matters", ""),
@@ -1889,9 +1976,15 @@ def generate_insight(signal: Signal, personal_context: dict) -> Insight:
         execution={
             "mode": insight_policy.get("mode"),
             "final_mode": insight_policy.get("mode"),
-            "validation_passed": _has_meaningful_insight(parsed),
+            "validation_passed": not fallback_used and _has_meaningful_insight(parsed),
+            "fallback_used": bool(fallback_used),
+            "analysis_reused": False,
+            "analysis_generated_at": analyzed_at,
         },
     )
+    if reuse is not None:
+        reuse.remember(reuse_key, "insight", insight.to_dict(), analyzed_at)
+    return insight
 
 
 def signal_to_output_dict(signal: Signal) -> dict:
@@ -2273,6 +2366,26 @@ def load_latest_pipeline_state(file_name: str, s3_key: str) -> dict:
         print(f"[INFO] No prior S3 pipeline state at {s3_key}: {e}")
 
     return {}
+
+
+def _load_analysis_reuse() -> AnalysisReuse:
+    """Use durable production state, never a stale file baked into the image."""
+    payload = {}
+    try:
+        if s3_uploads_disabled():
+            path = OUTPUT_DIR / "daily_radar.json"
+            if path.exists():
+                payload = json.loads(path.read_text(encoding="utf-8"))
+        else:
+            response = s3_client.get_object(
+                Bucket=S3_BUCKET_NAME, Key="daily/latest/daily_radar.json",
+            )
+            payload = json.loads(response["Body"].read().decode("utf-8"))
+    except Exception as exc:
+        # A cold/failed state read must never grant a fabricated cache hit.
+        print(f"[analysis_reuse] previous state unavailable ({type(exc).__name__})")
+    state = payload.get("analysis_reuse") if isinstance(payload, dict) else None
+    return AnalysisReuse(state)
 
 
 def save_feed_activity(today: str, rss_fetched: int, new_signals: int) -> None:
@@ -2683,6 +2796,7 @@ def _run_main_pipeline() -> None:
 
     personal_context = load_personal_context()
     print("Personal context loaded.")
+    analysis_reuse = _load_analysis_reuse()
     subscription_settings = load_ingestion_subscription_settings()
     print(
         "Ingestion subscription settings loaded. "
@@ -2713,7 +2827,7 @@ def _run_main_pipeline() -> None:
             f"Generating insight {idx}/{len(signals_for_insight)} "
             f"for signal: {signal.title}"
         )
-        insight = generate_insight(signal, personal_context)
+        insight = generate_insight(signal, personal_context, reuse=analysis_reuse)
         insights.append(insight)
 
     signals_data = [signal_to_output_dict(s) for s in signals]
@@ -2784,9 +2898,13 @@ def _run_main_pipeline() -> None:
     )
     agent_watch_summary = build_agent_watch_summary(signals_data)
     agent_watch_repo_snapshots = build_agent_watch_repo_snapshots(signals_data, now.isoformat())
-    agent_watch_repo_profiles = build_agent_watch_repo_profiles(signals_data, now.isoformat())
+    agent_watch_repo_profiles = build_agent_watch_repo_profiles(
+        signals_data, now.isoformat(), reuse=analysis_reuse,
+    )
     friction_signals_summary = build_friction_signals_summary(signals_data)
-    friction_signal_profiles = build_friction_signal_profiles(signals_data, now.isoformat())
+    friction_signal_profiles = build_friction_signal_profiles(
+        signals_data, now.isoformat(), reuse=analysis_reuse,
+    )
     previous_agent_tracking_state = load_latest_pipeline_state(
         "agent_watch_tracking_state.json",
         "signals/latest/agent_watch_tracking_state.json",
@@ -2874,7 +2992,9 @@ def _run_main_pipeline() -> None:
         "executive_summary": executive_summary,
         "signals": signals_data,
         "insights": insights_data,
+        "analysis_reuse": analysis_reuse.snapshot(),
     }
+    print(f"[analysis_reuse] reused analyses: {analysis_reuse.hits}")
 
     intelligence_outputs = build_intelligence_outputs(
         today=today,
