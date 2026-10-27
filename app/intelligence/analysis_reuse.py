@@ -53,7 +53,8 @@ def valid_analysis(kind: str, result: object) -> bool:
                 and isinstance(execution, dict)
                 and execution.get("validation_passed") is True
                 and execution.get("fallback_used") is False)
-    if result.get("confidence") not in {"low", "medium", "high"}:
+    confidence = result.get("confidence")
+    if not isinstance(confidence, str) or confidence not in {"low", "medium", "high"}:
         return False
     arrays = ("suggested_use_cases", "risks") if kind == "repo" else ("suggested_response",)
     return all(isinstance(result.get(k), list)
@@ -105,9 +106,15 @@ class AnalysisReuse:
         return deepcopy(entry)
 
     def remember(self, key: str, kind: str, result: dict, generated_at: str) -> None:
+        try:
+            result_digest = hashlib.sha256(_json(result).encode("utf-8")).hexdigest()
+        except (TypeError, ValueError):
+            # Optional reuse must not fail analysis on invalid JSON/UTF-8.
+            # UnicodeEncodeError is a ValueError; retain any prior valid entry.
+            return
         entry = {
             "kind": kind, "result": deepcopy(result), "generated_at": generated_at,
-            "result_digest": hashlib.sha256(_json(result).encode("utf-8")).hexdigest(),
+            "result_digest": result_digest,
         }
         if self._valid_entry(key, entry):
             self.entries.pop(key, None)
